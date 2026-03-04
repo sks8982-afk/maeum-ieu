@@ -123,7 +123,11 @@ export default function ChatPage() {
     } catch (e) {
         setMessages((prev) => [
           ...prev,
-          { role: "assistant", content: "잠시 후 다시 시도해 주세요." },
+          {
+            id: createId(),
+            role: "assistant",
+            content: "잠시 후 다시 시도해 주세요.",
+          },
         ]);
       } finally {
         setLoading(false);
@@ -197,7 +201,11 @@ export default function ChatPage() {
     } catch (e) {
         setMessages((prev) => [
           ...prev,
-          { role: "assistant", content: "잠시 후 다시 시도해 주세요." },
+          {
+            id: createId(),
+            role: "assistant",
+            content: "잠시 후 다시 시도해 주세요.",
+          },
         ]);
       } finally {
         setLoading(false);
