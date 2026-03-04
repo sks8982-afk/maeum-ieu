@@ -24,6 +24,57 @@ function getErrorMessage(e: unknown): string {
   return String(e);
 }
 
+/** 마크다운(```json ... ```)이 섞인 응답에서 JSON만 추출해 파싱 */
+function extractJsonFromResponse(raw: string): { text: string; transcription: string } | null {
+  try {
+    const codeBlock = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+    const jsonStr = codeBlock ? codeBlock[1].trim() : raw.trim();
+    const firstBrace = jsonStr.indexOf("{");
+    if (firstBrace === -1) return null;
+    const slice = jsonStr.slice(firstBrace);
+    let depth = 0;
+    let end = -1;
+    for (let i = 0; i < slice.length; i++) {
+      if (slice[i] === "{") depth++;
+      else if (slice[i] === "}") {
+        depth--;
+        if (depth === 0) {
+          end = i + 1;
+          break;
+        }
+      }
+    }
+    const toParse = end > 0 ? slice.slice(0, end) : slice;
+    const parsed = JSON.parse(toParse) as { text?: string; transcription?: string };
+    return {
+      text: typeof parsed.text === "string" ? parsed.text : "",
+      transcription: typeof parsed.transcription === "string" ? parsed.transcription : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** API 응답에서 TTS용 text와 받아쓰기용 transcription 안전 추출 (마크다운 JSON 대응) */
+function parseAudioResponse(data: unknown): { text: string; transcription: string } {
+  const fallback = { text: "", transcription: "" };
+  if (!data || typeof data !== "object" || !("text" in data)) return fallback;
+  const obj = data as { text?: unknown; transcription?: unknown };
+  let text = obj.text;
+  let transcription = obj.transcription;
+  if (typeof text === "string" && (text.includes("```") || text.includes("{"))) {
+    const extracted = extractJsonFromResponse(text);
+    if (extracted) {
+      text = extracted.text;
+      transcription = extracted.transcription || (typeof transcription === "string" ? transcription : "");
+    }
+  }
+  return {
+    text: typeof text === "string" ? text : "",
+    transcription: typeof transcription === "string" ? transcription : "",
+  };
+}
+
 export default function ChatPage() {
   const { data: session, status } = useSession();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -216,24 +267,24 @@ export default function ChatPage() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "오류");
-        const transcription: string | undefined = data.transcription;
-        const answer: string = data.text;
+
+        const { text: textToSpeak, transcription: transcriptionText } = parseAudioResponse(data);
 
         setMessages((prev) => {
           const updatedUser = prev.map((m) =>
             m.id === placeholderId
               ? {
                   ...m,
-                  content: transcription || "(음성 메시지)",
+                  content: transcriptionText || "(음성 메시지)",
                 }
               : m
           );
           return [
             ...updatedUser,
-            { id: createId(), role: "assistant", content: answer },
+            { id: createId(), role: "assistant", content: textToSpeak || "(답변 없음)" },
           ];
         });
-        speak(answer);
+        if (textToSpeak) speak(textToSpeak);
       } catch (e) {
         console.error("[chat] sendAudioMessage error", e);
         const msg = getErrorMessage(e);
