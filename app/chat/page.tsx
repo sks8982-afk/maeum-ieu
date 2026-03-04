@@ -6,10 +6,17 @@ import { AudioVisualizer } from "./AudioVisualizer";
 
 type Message = { role: "user" | "assistant"; content: string };
 
-const SpeechRecognitionAPI =
-  typeof window !== "undefined"
-    ? ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)
-    : undefined;
+const blobToBase64 = (blob: Blob) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const dataUrl = reader.result as string;
+      const base64 = dataUrl.split(",")[1] ?? "";
+      resolve(base64);
+    };
+    reader.onerror = (err) => reject(err);
+    reader.readAsDataURL(blob);
+  });
 
 export default function ChatPage() {
   const { data: session, status } = useSession();
@@ -19,10 +26,11 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false);
   const [micAllowed, setMicAllowed] = useState(false);
   const [aiSpeaking, setAiSpeaking] = useState(false);
-  const [listening, setListening] = useState(false);
+  const [listening, setListening] = useState(false); // 녹음 중 여부
   const bottomRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const recognitionRef = useRef<InstanceType<NonNullable<typeof SpeechRecognitionAPI>> | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<BlobPart[]>([]);
   const messagesRef = useRef<Message[]>([]);
   messagesRef.current = messages;
 
@@ -123,44 +131,91 @@ export default function ChatPage() {
     }
   }, []);
 
-  const startListening = useCallback(() => {
-    if (!SpeechRecognitionAPI || loading || !conversationId) return;
-    if (recognitionRef.current) {
+  const sendAudioMessage = useCallback(
+    async (audioBase64: string, mimeType: string) => {
+      if (!conversationId || loading) return;
+      const userMessage: Message = { role: "user", content: "(음성 메시지)" };
+      setMessages((prev) => [...prev, userMessage]);
+      setLoading(true);
+      setAiSpeaking(true);
+
       try {
-        recognitionRef.current.stop();
-      } catch {
-        // ignore
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversationId,
+            audio: { data: audioBase64, mimeType },
+            messages: [...messagesRef.current, userMessage],
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "오류");
+        setMessages((prev) => [...prev, { role: "assistant", content: data.text }]);
+        speak(data.text);
+      } catch (e) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: "잠시 후 다시 시도해 주세요." },
+        ]);
+      } finally {
+        setLoading(false);
+        setAiSpeaking(false);
       }
-      recognitionRef.current = null;
+    },
+    [conversationId, loading, speak]
+  );
+
+  const startRecording = useCallback(() => {
+    if (loading || !conversationId) return;
+    if (!streamRef.current) {
+      alert("먼저 '대화 시작하기' 버튼으로 마이크를 허용해 주세요.");
+      return;
     }
-    const recognition = new SpeechRecognitionAPI();
-    recognition.lang = "ko-KR";
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.onstart = () => setListening(true);
-    recognition.onend = () => setListening(false);
-    recognition.onerror = () => setListening(false);
-    recognition.onresult = (e: any) => {
-      const transcript = e.results[0]?.[0]?.transcript?.trim();
-      if (transcript) sendMessage(transcript);
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") return;
+    if (typeof window === "undefined" || !(window as any).MediaRecorder) {
+      alert("이 브라우저는 음성 녹음을 지원하지 않습니다.");
+      return;
+    }
+    const recorder = new MediaRecorder(streamRef.current, {
+      mimeType: "audio/webm",
+    } as MediaRecorderOptions);
+    audioChunksRef.current = [];
+    recorder.ondataavailable = (e: BlobEvent) => {
+      if (e.data && e.data.size > 0) {
+        audioChunksRef.current.push(e.data);
+      }
     };
-    recognitionRef.current = recognition;
+    recorder.onstart = () => setListening(true);
+    recorder.onstop = async () => {
+      setListening(false);
+      const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType });
+      try {
+        const base64 = await blobToBase64(blob);
+        await sendAudioMessage(base64, blob.type);
+      } catch {
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: "음성 처리 중 오류가 발생했습니다." },
+        ]);
+      }
+    };
+    mediaRecorderRef.current = recorder;
     try {
-      recognition.start();
+      recorder.start();
     } catch {
       setListening(false);
-      alert("음성 인식을 시작할 수 없습니다. Chrome 또는 Edge에서 시도해 주세요.");
+      alert("음성 녹음을 시작할 수 없습니다. Chrome 또는 Edge에서 시도해 주세요.");
     }
-  }, [loading, conversationId, sendMessage]);
+  }, [conversationId, loading, sendAudioMessage]);
 
-  const stopListening = useCallback(() => {
-    if (recognitionRef.current) {
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
       try {
-        recognitionRef.current.stop();
+        mediaRecorderRef.current.stop();
       } catch {
         // ignore
       }
-      recognitionRef.current = null;
     }
     setListening(false);
   }, []);
@@ -214,11 +269,11 @@ export default function ChatPage() {
           >
             대화 시작하기
           </button>
-        ) : SpeechRecognitionAPI ? (
+        ) : (
           <div className="flex gap-3">
             <button
               type="button"
-              onClick={listening ? stopListening : startListening}
+              onClick={listening ? stopRecording : startRecording}
               disabled={loading}
               className={`rounded-full px-8 py-4 text-lg font-medium text-white transition ${
                 listening
@@ -229,7 +284,7 @@ export default function ChatPage() {
               {listening ? "멈추기" : "말하기"}
             </button>
           </div>
-        ) : null}
+        )}
       </div>
 
       <div className="flex flex-1 flex-col overflow-hidden bg-white">
@@ -262,10 +317,10 @@ export default function ChatPage() {
 
         <form onSubmit={handleSubmit} className="border-t border-zinc-200 p-4">
           <div className="flex gap-2">
-            {micAllowed && SpeechRecognitionAPI && (
+            {micAllowed && (
               <button
                 type="button"
-                onClick={listening ? stopListening : startListening}
+                onClick={listening ? stopRecording : startRecording}
                 disabled={loading}
                 title={listening ? "멈추기" : "말하기"}
                 className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-xl ${

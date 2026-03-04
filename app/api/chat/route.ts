@@ -9,7 +9,8 @@ const SYSTEM_PROMPT = `당신은 '마음이음' 서비스의 AI 친구입니다.
 사용자와 자연스럽게 대화하며, 식사 여부나 일상, 기분 등을 편하게 물어봅니다.
 답변은 짧고 따뜻하게, 노인 사용자도 편하게 느끼도록 해주세요.
 의료·진단·처방은 하지 말고, 참고 수준의 대화만 이어가세요.
-인사할 때는 반드시 "안녕하세요, ○○님의 AI [역할] [이름]이에요" 형식으로 자신을 소개합니다.`;
+인사할 때는 반드시 "안녕하세요, ○○님의 AI [역할] [이름]이에요" 형식으로 자신을 소개합니다.
+모든 답변의 끝에는 항상 어르신의 건강 상태나 최근 식사 여부를 자연스럽게 물어보는 짧은 질문을 한 문장 포함해 주세요.`;
 
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
@@ -19,10 +20,11 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { messages, conversationId, isInitialGreeting } = body as {
+    const { messages, conversationId, isInitialGreeting, audio } = body as {
       messages?: { role: string; content: string }[];
       conversationId?: string;
       isInitialGreeting?: boolean;
+      audio?: { data: string; mimeType: string };
     };
 
     const apiKey = process.env.GEMINI_API_KEY;
@@ -64,6 +66,49 @@ export async function POST(req: Request) {
       .map((m: { role: string; content: string }) => `${m.role === "user" ? "사용자" : "AI"}: ${m.content}`)
       .join("\n");
 
+    // 음성 입력이 있는 멀티모달 요청
+    if (audio?.data && audio?.mimeType) {
+      const userName = (session.user as { name?: string | null }).name || "사용자";
+      const parts = [];
+      if (historyText) {
+        parts.push({
+          text: `지금까지의 대화 내역 요약:\n${historyText}\n`,
+        });
+      }
+      parts.push({
+        text: `${SYSTEM_PROMPT}\n\n아래 음성은 ${userName}님이 방금 하신 말씀입니다. 음성을 듣고 상황을 이해한 뒤, 손녀 '민지'로서 따뜻하게 대답해 주세요.`,
+      });
+      parts.push({
+        inlineData: {
+          mimeType: audio.mimeType,
+          data: audio.data,
+        },
+      });
+
+      const res = await model.generateContent({
+        contents: [
+          {
+            role: "user",
+            parts,
+          },
+        ],
+      });
+
+      const text = res.response.text();
+
+      if (conversationId) {
+        await prisma.message.create({
+          data: { conversationId, role: "user", content: "(음성 메시지)" },
+        });
+        await prisma.message.create({
+          data: { conversationId, role: "assistant", content: text },
+        });
+      }
+
+      return NextResponse.json({ text, role: "assistant" });
+    }
+
+    // 텍스트 기반 요청 (입력창에서 직접 타이핑한 경우)
     const prompt = `${SYSTEM_PROMPT}\n${memories ? `과거 맥락:\n${memories}\n` : ""}\n\n대화 내역:\n${historyText}\n\nAI:`;
     const res = await model.generateContent(prompt);
 
