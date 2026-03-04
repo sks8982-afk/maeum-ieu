@@ -129,7 +129,7 @@ export default function ChatPage() {
     recognition.onstart = () => setListening(true);
     recognition.onend = () => setListening(false);
     recognition.onerror = () => setListening(false);
-    recognition.onresult = (e: SpeechRecognitionEvent) => {
+    recognition.onresult = (e: any) => {
       const transcript = e.results[0]?.[0]?.transcript?.trim();
       if (transcript) sendMessage(transcript);
     };
