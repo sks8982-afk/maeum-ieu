@@ -26,6 +26,15 @@ export default function ChatPage() {
   const messagesRef = useRef<Message[]>([]);
   messagesRef.current = messages;
 
+  const speak = useCallback((text: string) => {
+    if (typeof window === "undefined") return;
+    if (!("speechSynthesis" in window)) return;
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = "ko-KR";
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utter);
+  }, []);
+
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
@@ -55,6 +64,7 @@ export default function ChatPage() {
       const { text } = (await chatRes.json()) as { text: string };
       if (cancelled) return;
       setMessages((prev) => [...prev, { role: "assistant", content: text }]);
+      speak(text);
       setAiSpeaking(true);
       setTimeout(() => setAiSpeaking(false), 3000);
     })();
@@ -84,6 +94,7 @@ export default function ChatPage() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "오류");
         setMessages((prev) => [...prev, { role: "assistant", content: data.text }]);
+        speak(data.text);
       } catch (e) {
         setMessages((prev) => [
           ...prev,
