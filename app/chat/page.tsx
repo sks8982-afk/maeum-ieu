@@ -76,7 +76,10 @@ export default function ChatPage() {
       if (!chatRes.ok || cancelled) return;
       const { text } = (await chatRes.json()) as { text: string };
       if (cancelled) return;
-      setMessages((prev) => [...prev, { role: "assistant", content: text }]);
+      setMessages((prev) => [
+        ...prev,
+        { id: createId(), role: "assistant", content: text },
+      ]);
       speak(text);
       setAiSpeaking(true);
       setTimeout(() => setAiSpeaking(false), 3000);
