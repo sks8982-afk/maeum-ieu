@@ -76,7 +76,7 @@ export async function POST(req: Request) {
         });
       }
       parts.push({
-        text: `${SYSTEM_PROMPT}\n\n아래 음성은 ${userName}님이 방금 하신 말씀입니다. 음성을 듣고 상황을 이해한 뒤, 손녀 '민지'로서 따뜻하게 대답해 주세요.`,
+        text: `${SYSTEM_PROMPT}\n\n아래 음성은 ${userName}님이 방금 하신 말씀입니다. 음성을 듣고 상황을 이해한 뒤, 손녀 '민지'로서 따뜻하게 대답해 주세요.\n\n응답은 반드시 다음 JSON 형식의 문자열로만, 추가 설명 없이 반환해 주세요.\n{\n  "transcription": "사용자의 음성을 한국어로 정확하게 받아 적은 문장",\n  "text": "transcription을 기반으로 한 당신의 대답 문장"\n}\nJSON 이외의 텍스트(설명, 마크다운 등)는 절대 포함하지 마세요.`,
       });
       parts.push({
         inlineData: {
@@ -94,18 +94,43 @@ export async function POST(req: Request) {
         ],
       });
 
-      const text = res.response.text();
+      const raw = res.response.text().trim();
+      let transcription = "";
+      let answerText = raw;
+
+      try {
+        const parsed = JSON.parse(raw) as {
+          transcription?: string;
+          text?: string;
+        };
+        if (parsed.transcription && typeof parsed.transcription === "string") {
+          transcription = parsed.transcription;
+        }
+        if (parsed.text && typeof parsed.text === "string") {
+          answerText = parsed.text;
+        }
+      } catch {
+        // JSON 파싱 실패 시 전체를 답변 텍스트로 사용하고, transcription은 비워 둡니다.
+      }
 
       if (conversationId) {
         await prisma.message.create({
-          data: { conversationId, role: "user", content: "(음성 메시지)" },
+          data: {
+            conversationId,
+            role: "user",
+            content: transcription || "(음성 메시지)",
+          },
         });
         await prisma.message.create({
-          data: { conversationId, role: "assistant", content: text },
+          data: { conversationId, role: "assistant", content: answerText },
         });
       }
 
-      return NextResponse.json({ text, role: "assistant" });
+      return NextResponse.json({
+        text: answerText,
+        transcription,
+        role: "assistant",
+      });
     }
 
     // 텍스트 기반 요청 (입력창에서 직접 타이핑한 경우)

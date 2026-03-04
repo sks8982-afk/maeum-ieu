@@ -4,7 +4,7 @@ import { useSession, signOut } from "next-auth/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AudioVisualizer } from "./AudioVisualizer";
 
-type Message = { role: "user" | "assistant"; content: string };
+type Message = { id: string; role: "user" | "assistant"; content: string };
 
 const blobToBase64 = (blob: Blob) =>
   new Promise<string>((resolve, reject) => {
@@ -33,6 +33,11 @@ export default function ChatPage() {
   const audioChunksRef = useRef<BlobPart[]>([]);
   const messagesRef = useRef<Message[]>([]);
   messagesRef.current = messages;
+
+  const createId = () =>
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
   const speak = useCallback((text: string) => {
     if (typeof window === "undefined") return;
@@ -84,7 +89,11 @@ export default function ChatPage() {
   const sendMessage = useCallback(
     async (content: string) => {
       if (!content.trim() || loading || !conversationId) return;
-      const userMessage: Message = { role: "user", content: content.trim() };
+      const userMessage: Message = {
+        id: createId(),
+        role: "user",
+        content: content.trim(),
+      };
       setMessages((prev) => [...prev, userMessage]);
       setInput("");
       setLoading(true);
@@ -96,14 +105,19 @@ export default function ChatPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             conversationId,
-            messages: [...messagesRef.current, userMessage],
+            messages: [...messagesRef.current, userMessage].map(
+              ({ role, content }) => ({ role, content })
+            ),
           }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "오류");
-        setMessages((prev) => [...prev, { role: "assistant", content: data.text }]);
+        setMessages((prev) => [
+          ...prev,
+          { id: createId(), role: "assistant", content: data.text },
+        ]);
         speak(data.text);
-      } catch (e) {
+    } catch (e) {
         setMessages((prev) => [
           ...prev,
           { role: "assistant", content: "잠시 후 다시 시도해 주세요." },
@@ -113,7 +127,7 @@ export default function ChatPage() {
         setAiSpeaking(false);
       }
     },
-    [loading, conversationId, messages]
+    [loading, conversationId, messages, createId, speak]
   );
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -134,8 +148,13 @@ export default function ChatPage() {
   const sendAudioMessage = useCallback(
     async (audioBase64: string, mimeType: string) => {
       if (!conversationId || loading) return;
-      const userMessage: Message = { role: "user", content: "(음성 메시지)" };
-      setMessages((prev) => [...prev, userMessage]);
+      const placeholderId = createId();
+      const placeholder: Message = {
+        id: placeholderId,
+        role: "user",
+        content: "(음성 인식 중...)",
+      };
+      setMessages((prev) => [...prev, placeholder]);
       setLoading(true);
       setAiSpeaking(true);
 
@@ -146,14 +165,33 @@ export default function ChatPage() {
           body: JSON.stringify({
             conversationId,
             audio: { data: audioBase64, mimeType },
-            messages: [...messagesRef.current, userMessage],
+            messages: messagesRef.current.map(({ role, content }) => ({
+              role,
+              content,
+            })),
           }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "오류");
-        setMessages((prev) => [...prev, { role: "assistant", content: data.text }]);
-        speak(data.text);
-      } catch (e) {
+        const transcription: string | undefined = data.transcription;
+        const answer: string = data.text;
+
+        setMessages((prev) => {
+          const updatedUser = prev.map((m) =>
+            m.id === placeholderId
+              ? {
+                  ...m,
+                  content: transcription || "(음성 메시지)",
+                }
+              : m
+          );
+          return [
+            ...updatedUser,
+            { id: createId(), role: "assistant", content: answer },
+          ];
+        });
+        speak(answer);
+    } catch (e) {
         setMessages((prev) => [
           ...prev,
           { role: "assistant", content: "잠시 후 다시 시도해 주세요." },
@@ -289,9 +327,9 @@ export default function ChatPage() {
 
       <div className="flex flex-1 flex-col overflow-hidden bg-white">
         <div className="flex-1 overflow-y-auto px-4 py-4">
-          {messages.map((m, i) => (
+          {messages.map((m) => (
             <div
-              key={i}
+              key={m.id}
               className={`mb-3 flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
             >
               <div
