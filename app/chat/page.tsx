@@ -19,9 +19,15 @@ const blobToBase64 = (blob: Blob) =>
   });
 
 function getErrorMessage(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  if (typeof e === "string") return e;
-  return String(e);
+  const raw = e instanceof Error ? e.message : typeof e === "string" ? e : String(e);
+  const isApiQuotaError =
+    raw.includes("429") ||
+    raw.includes("Too Many Requests") ||
+    raw.includes("quota") ||
+    raw.includes("Quota exceeded") ||
+    raw.includes("GoogleGenerativeAI") ||
+    raw.includes("rate-limit");
+  return isApiQuotaError ? "오늘은 사용할 수 없습니다. 잠시 후 다시 시도해 주세요." : raw;
 }
 
 /** 마크다운(```json ... ```)이 섞인 응답에서 JSON만 추출해 파싱 */
@@ -246,12 +252,13 @@ export default function ChatPage() {
       } catch (e) {
         console.error("[chat] sendMessage error", e);
         const msg = getErrorMessage(e);
+        const displayMsg = msg.startsWith("오늘은 사용할 수 없습니다") ? msg : `오류: ${msg}`;
         setMessages((prev) => [
           ...prev,
           {
             id: createId(),
             role: "assistant",
-            content: `오류: ${msg}`,
+            content: displayMsg,
           },
         ]);
       } finally {
@@ -327,12 +334,13 @@ export default function ChatPage() {
       } catch (e) {
         console.error("[chat] sendAudioMessage error", e);
         const msg = getErrorMessage(e);
+        const displayMsg = msg.startsWith("오늘은 사용할 수 없습니다") ? msg : `오류: ${msg}`;
         setMessages((prev) => [
           ...prev,
           {
             id: createId(),
             role: "assistant",
-            content: `오류: ${msg}`,
+            content: displayMsg,
           },
         ]);
       } finally {
@@ -373,12 +381,13 @@ export default function ChatPage() {
       } catch (e) {
         console.error("[chat] recorder onstop error", e);
         const msg = getErrorMessage(e);
+        const displayMsg = msg.startsWith("오늘은 사용할 수 없습니다") ? msg : `음성 처리 오류: ${msg}`;
         setMessages((prev) => [
           ...prev,
           {
             id: createId(),
             role: "assistant",
-            content: `음성 처리 오류: ${msg}`,
+            content: displayMsg,
           },
         ]);
       }

@@ -385,8 +385,18 @@ JSON만 출력하세요.`;
     return NextResponse.json({ text, role: "assistant" });
   } catch (e) {
     console.error("chat api error", e);
-    const message =
+    const raw =
       e instanceof Error ? e.message : typeof e === "string" ? e : "답변 생성 중 오류가 발생했습니다.";
+    const isQuotaOrRateLimit =
+      raw.includes("429") ||
+      raw.includes("Too Many Requests") ||
+      raw.includes("quota") ||
+      raw.includes("Quota exceeded") ||
+      raw.includes("rate") ||
+      raw.includes("GoogleGenerativeAI");
+    const message = isQuotaOrRateLimit
+      ? "오늘은 사용할 수 없습니다. 잠시 후 다시 시도해 주세요."
+      : raw;
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
