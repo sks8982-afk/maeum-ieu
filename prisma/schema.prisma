@@ -61,10 +61,10 @@ model VerificationToken {
   @@id([identifier, token])
 }
 
-// 대화 (나중에 RAG용 메모리 확장)
+// 대화: 사용자당 1개만 존재 (오랜 기간 데이터 누적)
 model Conversation {
   id        String   @id @default(cuid())
-  userId    String
+  userId    String   @unique
   title     String?  @default("새 대화")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

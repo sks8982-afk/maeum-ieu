@@ -187,6 +187,10 @@ export async function POST(req: Request) {
         await prisma.message.createMany({
           data: [{ conversationId, role: "assistant", content: text }],
         });
+        await prisma.conversation.update({
+          where: { id: conversationId },
+          data: { updatedAt: new Date() },
+        });
       }
       return NextResponse.json({ text, role: "assistant" });
     }
@@ -206,16 +210,21 @@ export async function POST(req: Request) {
     // 음성 입력이 있는 멀티모달 요청
     if (audio?.data && audio?.mimeType) {
       const parts = [];
-      if (historyText) {
+      if (historyText || memories) {
         parts.push({
-          text: `지금까지의 대화 내역 요약:\n${historyText}\n`,
+          text: [
+            memories ? `과거 맥락 (이 사용자가 예전에 말한 내용):\n${memories}\n` : "",
+            historyText ? `지금까지의 대화 내역:\n${historyText}\n` : "",
+          ]
+            .filter(Boolean)
+            .join("\n"),
         });
       }
       parts.push({
         text: `${systemPromptWithContext}
 
 아래 음성은 ${honorific} ${userName}님이 방금 하신 말씀입니다. 음성을 듣고 상황을 이해한 뒤, 손녀 '민지'로서 ${honorific}을/를 부르며 따뜻하게 대답해 주세요.
-[지시] 위 "지금까지의 대화 내역"에서 사용자가 이미 답한 내용(식사·수면·기분 등)은 다시 묻지 말고, 아직 안 물어본 주제로만 질문하세요.
+${memories ? "[지시] 위 '과거 맥락'에 사용자가 예전에 말한 내용이 있으면, '기억나니?' 등으로 물어보면 그 내용을 활용해 답하세요.\n" : ""}[지시] 위 "지금까지의 대화 내역"에서 사용자가 이미 답한 내용(식사·수면·기분 등)은 다시 묻지 말고, 아직 안 물어본 주제로만 질문하세요.
 위 [현재 환경 정보]와 [인지 모니터링 지침]을 참고하여, 사용자 말이 실제 날씨/시간과 다르면 isAnomaly를 true로 하고 analysisNote에 짧게 사유를 적은 뒤, 부드럽게 재질문하는 답변을 text에 넣어 주세요.
 
 응답은 반드시 다음 JSON 형식의 문자열로만, 추가 설명 없이 반환해 주세요.
@@ -290,6 +299,10 @@ JSON 이외의 텍스트(설명, 마크다운 등)는 절대 포함하지 마세
         saveMessageEmbedding(session.user.id, assistantMsg.id, assistantMsg.content).catch((e) =>
           console.warn("RAG saveMessageEmbedding (assistant) failed:", e)
         );
+        await prisma.conversation.update({
+          where: { id: conversationId },
+          data: { updatedAt: new Date() },
+        });
       }
 
       return NextResponse.json({
@@ -301,7 +314,7 @@ JSON 이외의 텍스트(설명, 마크다운 등)는 절대 포함하지 마세
 
     // 텍스트 기반 요청 (입력창에서 직접 타이핑한 경우)
     const textPrompt = `${systemPromptWithContext}
-${memories ? `과거 맥락:\n${memories}\n` : ""}
+${memories ? `과거 맥락 (이 사용자가 예전 대화에서 말한 내용):\n${memories}\n[지시] 사용자가 "기억나니?", "아까 말한 거" 등으로 물어보면 위 과거 맥락에서 해당 정보를 찾아 답하세요. 예: 좋아하는 음식, 식사·수면·일정 등.\n` : ""}
 
 대화 내역:
 ${historyText}
@@ -363,6 +376,10 @@ JSON만 출력하세요.`;
       saveMessageEmbedding(session.user.id, assistantMsg.id, assistantMsg.content).catch((e) =>
         console.warn("RAG saveMessageEmbedding (assistant) failed:", e)
       );
+      await prisma.conversation.update({
+        where: { id: conversationId },
+        data: { updatedAt: new Date() },
+      });
     }
 
     return NextResponse.json({ text, role: "assistant" });

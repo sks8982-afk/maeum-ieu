@@ -144,23 +144,53 @@ export default function ChatPage() {
     );
   }, []);
 
-  // 대화 시작 시 AI 선인사 + 대화 ID 생성
+  // 진입 시: 최근 대화 불러오기. 있으면 복구, 없으면 새 대화 생성 + AI 선인사
   useEffect(() => {
     if (status !== "authenticated" || conversationId !== null) return;
 
     let cancelled = false;
     (async () => {
-      const convRes = await fetch("/api/conversations", { method: "POST" });
-      if (!convRes.ok || cancelled) return;
-      const { id } = (await convRes.json()) as { id: string };
+      const getRes = await fetch("/api/conversations", { method: "GET" });
+      if (!getRes.ok || cancelled) return;
+      const data = (await getRes.json()) as {
+        conversation?: { id: string } | null;
+        messages?: { id: string; role: string; content: string }[];
+      };
       if (cancelled) return;
-      setConversationId(id);
+
+      const conv = data.conversation ?? null;
+      const existingMessages = Array.isArray(data.messages) ? data.messages : [];
+
+      if (conv?.id && existingMessages.length > 0) {
+        setConversationId(conv.id);
+        setMessages(
+          existingMessages.map((m) => ({
+            id: m.id,
+            role: m.role as "user" | "assistant",
+            content: m.content,
+          }))
+        );
+        return;
+      }
+
+      let conversationIdToUse: string;
+      if (conv?.id) {
+        conversationIdToUse = conv.id;
+        setConversationId(conv.id);
+      } else {
+        const postRes = await fetch("/api/conversations", { method: "POST" });
+        if (!postRes.ok || cancelled) return;
+        const { id } = (await postRes.json()) as { id: string };
+        if (cancelled) return;
+        conversationIdToUse = id;
+        setConversationId(id);
+      }
 
       const chatRes = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          conversationId: id,
+          conversationId: conversationIdToUse,
           isInitialGreeting: true,
           context: getContext(),
         }),
