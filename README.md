@@ -8,8 +8,10 @@ AI와 대화하며 일상·상태를 함께 살펴보는 서비스입니다.
 - **프론트/백엔드**: Next.js 16 (App Router)
 - **DB**: PostgreSQL (로컬 또는 AWS RDS + pgvector 예정)
 - **인증**: NextAuth (Credentials + Prisma)
-- **AI**: Google Gemini (채팅), RAG 방식 예정
+- **AI**: Google Gemini (채팅). 같은 대화 내 맥락은 메시지로 전달, RAG(pgvector)는 예정.
 - **스토리지**: AWS S3 예정 (가족 목소리 파일 등)
+
+상세 기술 현황·RAG·목소리 학습 설계는 [docs/PLAN.md](docs/PLAN.md) 참고.
 
 ## 로컬 실행
 
@@ -54,6 +56,7 @@ npm run dev
 
 ## 다음 단계 예정
 
-- RAG: pgvector로 과거 대화 검색 후 맥락 반영
-- 음성 입력 (STT) / 음성 출력 (TTS, 가족 목소리 학습)
+- RAG: pgvector로 과거 대화 검색 후 맥락 반영 (현재는 같은 대화 내 메시지만 사용, 반복 질문 방지 지시 적용됨)
+- 사용자 목소리 등록: 회원가입 시 본인 목소리 학습 → 대화 시 “사용자 vs 타인” 구분 (잘못된 진단 방지)
+- 음성 출력 (TTS): 가족 목소리 대체 시, 회원가입/설정에서 가족 목소리 등록
 - AWS RDS, S3 연동

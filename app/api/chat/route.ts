@@ -3,13 +3,19 @@ import { getServerSession } from "next-auth";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { searchMemories, saveMessageEmbedding } from "@/lib/rag";
 
 const SYSTEM_PROMPT_BASE = `당신은 '마음이음' 서비스의 AI 친구입니다.
 사용자와 자연스럽게 대화하며, 식사 여부나 일상, 기분 등을 편하게 물어봅니다.
 답변은 짧고 따뜻하게, 노인 사용자도 편하게 느끼도록 해주세요.
 의료·진단·처방은 하지 말고, 참고 수준의 대화만 이어가세요.
 인사할 때는 반드시 "안녕하세요, ○○님의 AI [역할] [이름]이에요" 형식으로 자신을 소개합니다.
-모든 답변의 끝에는 항상 어르신의 건강 상태나 최근 식사 여부를 자연스럽게 물어보는 짧은 질문을 한 문장 포함해 주세요.`;
+
+[중요: 반복 질문 금지]
+- 대화 내역에서 사용자가 이미 답한 내용(예: 저녁 먹었음, 잠 잘 잤음, 식사 여부, 기분 등)은 절대 다시 묻지 마세요.
+- 이미 물었던 질문을 바꿔서 다시 하지 마세요. (예: "저녁 드셨나요?" → "잘 주무셨나요?" → "저녁은 드셨는지..." 순으로 같은 류만 반복 금지)
+- 새로 물어볼 때는 아직 이야기하지 않은 주제(다른 끼니, 산책, 오늘 일과, 감정 등)를 고르거나, 대화를 자연스럽게 이어가세요.
+- 답변 끝의 질문은 "이미 답한 것"이 아닌, "아직 안 물어본 것" 하나만 포함하세요.`;
 
 /** 현재 시간(클라이언트 전달 또는 서버) 기준으로 아침/점심/저녁 등 레이블 생성 */
 function getTimeContext(clientTimeIso?: string) {
@@ -158,9 +164,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ text, role: "assistant" });
     }
 
-    // RAG: 추후 prisma + pgvector로 유사 과거 대화 검색
-    // const memories = await searchMemories(session.user.id, lastUserMessage);
-    const memories = "";
+    // RAG: 과거 대화 유사도 검색 (pgvector + message_embeddings 테이블 필요)
+    const lastUserMessage = messages?.filter((m: { role: string }) => m.role === "user").pop()?.content ?? "";
+    let memories = "";
+    try {
+      memories = await searchMemories(session.user.id, lastUserMessage, 5);
+    } catch (e) {
+      console.warn("RAG searchMemories failed (pgvector/table may be missing):", e);
+    }
     const historyText = (messages ?? [])
       .map((m: { role: string; content: string }) => `${m.role === "user" ? "사용자" : "AI"}: ${m.content}`)
       .join("\n");
@@ -177,6 +188,7 @@ export async function POST(req: Request) {
         text: `${systemPromptWithContext}
 
 아래 음성은 ${honorific} ${userName}님이 방금 하신 말씀입니다. 음성을 듣고 상황을 이해한 뒤, 손녀 '민지'로서 ${honorific}을/를 부르며 따뜻하게 대답해 주세요.
+[지시] 위 "지금까지의 대화 내역"에서 사용자가 이미 답한 내용(식사·수면·기분 등)은 다시 묻지 말고, 아직 안 물어본 주제로만 질문하세요.
 위 [현재 환경 정보]와 [인지 모니터링 지침]을 참고하여, 사용자 말이 실제 날씨/시간과 다르면 isAnomaly를 true로 하고 analysisNote에 짧게 사유를 적은 뒤, 부드럽게 재질문하는 답변을 text에 넣어 주세요.
 
 응답은 반드시 다음 JSON 형식의 문자열로만, 추가 설명 없이 반환해 주세요.
@@ -228,14 +240,14 @@ JSON 이외의 텍스트(설명, 마크다운 등)는 절대 포함하지 마세
       }
 
       if (conversationId) {
-        await prisma.message.create({
+        const userMsg = await prisma.message.create({
           data: {
             conversationId,
             role: "user",
             content: transcription || "(음성 메시지)",
           },
         });
-        await prisma.message.create({
+        const assistantMsg = await prisma.message.create({
           data: {
             conversationId,
             role: "assistant",
@@ -255,6 +267,13 @@ JSON 이외의 텍스트(설명, 마크다운 등)는 절대 포함하지 마세
             },
           });
         }
+        // RAG: 저장된 메시지 임베딩하여 검색용 테이블에 넣기 (실패 시 채팅은 유지)
+        saveMessageEmbedding(session.user.id, userMsg.id, userMsg.content).catch((e) =>
+          console.warn("RAG saveMessageEmbedding (user) failed:", e)
+        );
+        saveMessageEmbedding(session.user.id, assistantMsg.id, assistantMsg.content).catch((e) =>
+          console.warn("RAG saveMessageEmbedding (assistant) failed:", e)
+        );
       }
 
       return NextResponse.json({
@@ -271,6 +290,7 @@ ${memories ? `과거 맥락:\n${memories}\n` : ""}
 대화 내역:
 ${historyText}
 
+[지시] 위 대화 내역을 반드시 참고하세요. 사용자가 이미 답한 내용(식사·수면·기분 등)은 다시 묻지 말고, 아직 안 물어본 주제로만 질문하세요.
 위 [인지 모니터링 지침]을 참고하여 응답하세요. 응답은 반드시 다음 JSON 형식의 문자열 하나만 반환하세요. 추가 설명 없이.
 {"text": "사용자에게 할 말 (한 문장으로)", "isAnomaly": false, "analysisNote": ""}
 (인지 오류가 없으면 isAnomaly false, analysisNote 빈 문자열. 인지 오류가 있으면 isAnomaly true, analysisNote에 한 줄 요약)
@@ -300,12 +320,13 @@ JSON만 출력하세요.`;
 
     if (conversationId) {
       const lastUser = messages?.filter((m: { role: string }) => m.role === "user").pop();
+      let userMsg: { id: string; content: string } | null = null;
       if (lastUser) {
-        await prisma.message.create({
+        userMsg = await prisma.message.create({
           data: { conversationId, role: "user", content: lastUser.content },
         });
       }
-      await prisma.message.create({
+      const assistantMsg = await prisma.message.create({
         data: {
           conversationId,
           role: "assistant",
@@ -325,6 +346,15 @@ JSON만 출력하세요.`;
           },
         });
       }
+      // RAG: 저장된 메시지 임베딩 (실패 시 채팅은 유지)
+      if (userMsg) {
+        saveMessageEmbedding(session.user.id, userMsg.id, userMsg.content).catch((e) =>
+          console.warn("RAG saveMessageEmbedding (user) failed:", e)
+        );
+      }
+      saveMessageEmbedding(session.user.id, assistantMsg.id, assistantMsg.content).catch((e) =>
+        console.warn("RAG saveMessageEmbedding (assistant) failed:", e)
+      );
     }
 
     return NextResponse.json({ text, role: "assistant" });
