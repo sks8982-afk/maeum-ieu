@@ -495,7 +495,7 @@ export default function ChatPage() {
             건강<br />기록
           </Link>
           <span className="text-xs text-zinc-500">
-            {(session.user?.email ?? "").split("@")[0]}님
+            {session.user?.name ?? "사용자"}님
           </span>
           <button
             type="button"
