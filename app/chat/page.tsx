@@ -65,9 +65,18 @@ function extractJsonFromResponse(raw: string): { text: string; transcription: st
   }
 }
 
-/** 대화창에 표시할 때: ```json 또는 raw JSON이면 .text만 보여주기 (DB에 옛날 데이터가 남아있는 경우 대비) */
+/** 대화창에 표시할 때: JSON이나 기술 데이터를 제거하고 대화 텍스트만 표시 */
 function displayMessageContent(content: string): string {
   if (!content || !content.trim()) return content;
+  // AI가 실수로 포함한 cognitiveChecks 등 기술 데이터 제거
+  let cleaned = content
+    .replace(/cognitiveChecks\s*:\s*\[[\s\S]*?\]/g, "")
+    .replace(/isAnomaly\s*:\s*(true|false)/gi, "")
+    .replace(/analysisNote\s*:\s*"[^"]*"/g, "")
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/\{[\s\S]*?"domain"[\s\S]*?\}/g, "")
+    .trim();
+  if (cleaned !== content) return cleaned || content;
   if (!content.includes("```") && !content.trimStart().startsWith("{")) return content;
   const extracted = extractJsonFromResponse(content);
   if (extracted?.text) return extracted.text;
@@ -128,6 +137,12 @@ export default function ChatPage() {
 
     // TTS가 읽기 좋도록 텍스트 전처리
     let ttsText = text
+      // AI가 실수로 포함한 JSON/기술 데이터 제거
+      .replace(/cognitiveChecks\s*:\s*\[[\s\S]*?\]/g, "")
+      .replace(/isAnomaly\s*:\s*(true|false)/g, "")
+      .replace(/analysisNote\s*:\s*"[^"]*"/g, "")
+      .replace(/```[\s\S]*?```/g, "")
+      .replace(/\{[\s\S]*?"domain"[\s\S]*?\}/g, "")
       // "12-3-30" → "12, 3, 30" (숫자-하이픈 패턴을 쉼표 구분으로)
       .replace(/(\d+)-(\d+)-(\d+)/g, "$1, $2, $3")
       // "4.8km" → "4.8 킬로미터"
@@ -136,7 +151,8 @@ export default function ChatPage() {
       // URL이나 이메일 제거 (읽으면 이상함)
       .replace(/https?:\/\/\S+/g, "링크")
       // 괄호 안 영문 약어 제거
-      .replace(/\([A-Za-z0-9./%]+\)/g, "");
+      .replace(/\([A-Za-z0-9./%]+\)/g, "")
+      .trim();
 
     const utter = new SpeechSynthesisUtterance(ttsText);
     utter.lang = "ko-KR";

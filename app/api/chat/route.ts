@@ -262,11 +262,19 @@ ${historyText}
         // 스트림 완료 → [DONE] 보내기 전에 DB 저장 완료
         if (conversationId && userContent) {
           try {
+            // AI 응답에서 혹시 섞인 JSON/기술 데이터 제거 후 저장
+            const cleanedText = fullText
+              .replace(/cognitiveChecks\s*:\s*\[[\s\S]*?\]/g, "")
+              .replace(/isAnomaly\s*:\s*(true|false)/gi, "")
+              .replace(/analysisNote\s*:\s*"[^"]*"/g, "")
+              .replace(/\{[\s\S]*?"domain"[\s\S]*?\}/g, "")
+              .trim();
+
             const { assistantMsg } = await saveMessages({
               conversationId,
               userId,
               userContent,
-              assistantContent: fullText,
+              assistantContent: cleanedText || fullText,
               isAnomaly: false,
               analysisNote: null,
             });
