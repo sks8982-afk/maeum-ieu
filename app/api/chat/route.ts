@@ -7,269 +7,184 @@ import type { ChatRequestBody } from "@/lib/chat/types";
 import { getTimeContext, getCurrentKstDateTimeString, isDateTimeQuestion } from "@/lib/chat/time";
 import { getWeatherContext } from "@/lib/chat/weather";
 import { buildSystemPrompt } from "@/lib/chat/prompt";
-import { parseGeminiResponse } from "@/lib/chat/parser";
-import { saveMessages, saveGreetingMessage } from "@/lib/chat/messages";
+import { saveMessages, saveGreetingMessage, saveCognitiveAssessments, markAnomaly } from "@/lib/chat/messages";
+import { analyzeCognitive } from "@/lib/chat/cognitive-analyzer";
 
-// ─── helpers ────────────────────────────────────────────────────────────────
+// ─── Gemini 모델 ────────────────────────────────────────────────────────────
 
-function getGeminiApiKey(): string {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY가 설정되지 않았습니다.");
-  return apiKey;
+function getApiKey(): string {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) throw new Error("GEMINI_API_KEY가 설정되지 않았습니다.");
+  return key;
 }
 
-/** 일반 텍스트 응답용 모델 (인사, 텍스트 채팅) */
+/** 텍스트 응답용 (googleSearch O, JSON 강제 X) */
 function getTextModel(systemInstruction: string) {
-  return new GoogleGenerativeAI(getGeminiApiKey()).getGenerativeModel({
+  return new GoogleGenerativeAI(getApiKey()).getGenerativeModel({
     model: "gemini-2.5-flash",
     systemInstruction,
-    generationConfig: {
-      temperature: 0.7,
-      maxOutputTokens: 2048,
-    },
-    // @ts-expect-error -- googleSearch 도구는 REST API에서 지원하지만 SDK 타입에 아직 미반영
+    generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+    // @ts-expect-error -- googleSearch SDK 타입 미반영
     tools: [{ googleSearch: {} }],
   });
 }
 
-/** JSON 응답 강제 모델 (음성 멀티모달 — transcription + isAnomaly 파싱 필요) */
+/** 음성 JSON용 (googleSearch X, JSON 강제 O) */
 function getJsonModel(systemInstruction: string) {
-  return new GoogleGenerativeAI(getGeminiApiKey()).getGenerativeModel({
+  return new GoogleGenerativeAI(getApiKey()).getGenerativeModel({
     model: "gemini-2.5-flash",
     systemInstruction,
-    generationConfig: {
-      temperature: 0.7,
-      maxOutputTokens: 2048,
-      responseMimeType: "application/json",
-    },
-    // 주의: responseMimeType: "application/json"과 googleSearch는 호환 안 됨
+    generationConfig: { temperature: 0.7, maxOutputTokens: 2048, responseMimeType: "application/json" },
   });
 }
 
+// ─── 공통 유틸 ──────────────────────────────────────────────────────────────
+
 function buildHistoryText(messages: { role: string; content: string }[]): string {
-  return messages
-    .map((m) => `${m.role === "user" ? "사용자" : "AI"}: ${m.content}`)
-    .join("\n");
+  return messages.map((m) => `${m.role === "user" ? "사용자" : "AI"}: ${m.content}`).join("\n");
 }
 
 async function fetchMemories(userId: string, query: string): Promise<string> {
-  try {
-    return await searchMemories(userId, query, 5);
-  } catch (e) {
-    console.warn("RAG searchMemories failed:", e);
-    return "";
-  }
+  try { return await searchMemories(userId, query, 5); }
+  catch { return ""; }
 }
 
-function toSafeErrorMessage(e: unknown): string {
-  const raw = e instanceof Error ? e.message : typeof e === "string" ? e : "답변 생성 중 오류가 발생했습니다.";
-  const isQuota =
-    raw.includes("429") ||
-    raw.includes("Too Many Requests") ||
-    raw.includes("quota") ||
-    raw.includes("Quota exceeded") ||
-    raw.includes("rate") ||
-    raw.includes("GoogleGenerativeAI");
+function toSafeError(e: unknown): string {
+  const raw = e instanceof Error ? e.message : "";
+  const isQuota = /429|Too Many|quota|Quota exceeded|rate|GoogleGenerativeAI/.test(raw);
   return isQuota ? "오늘은 사용할 수 없습니다. 잠시 후 다시 시도해 주세요." : "답변 생성 중 오류가 발생했습니다.";
 }
 
-// ─── 요청 핸들러별 분리 ─────────────────────────────────────────────────────
+/** 인지 분석 실행 후 DB에 저장 (실패해도 대화에 영향 없음) */
+async function runCognitiveAnalysis(params: {
+  userId: string;
+  conversationId: string;
+  assistantMsgId: string;
+  userMessage: string;
+  assistantResponse: string;
+  historyText: string;
+  envBlock: string;
+}): Promise<void> {
+  const { userId, conversationId, assistantMsgId, userMessage, assistantResponse, historyText, envBlock } = params;
+  try {
+    const analysis = await analyzeCognitive({ userMessage, assistantResponse, historyText, envBlock });
 
-/** 1-A) 최초 인사 (새 사용자) */
-async function handleFirstGreeting(
-  systemPrompt: string,
-  userName: string,
-  honorific: string,
-  conversationId?: string,
-) {
-  const model = getTextModel(systemPrompt);
-  const prompt = `지금 ${userName}님이 대화를 시작하려고 합니다. AI 가족 역할은 '손녀/손자'로 하고, 이름은 '민지'로 해주세요.
-위 [사용자 정보]의 호칭(${honorific})으로 부르면서, [현재 환경 정보]를 반영해 현재 시각대에 맞는 구체적인 선제적 질문을 포함한 첫 인사 한 마디만 짧게 해주세요.
-예: 할아버지/할머니에게 "아침 식사는 하셨나요?", "점심 드셨나요?", "오늘 날씨가 맑은데 산책 어떠세요?" 등. (본인 소개 포함)`;
-
-  const res = await model.generateContent(prompt);
-  const text = res.response.text();
-
-  if (conversationId) {
-    await saveGreetingMessage(conversationId, text);
+    if (analysis.cognitiveChecks.length > 0) {
+      await saveCognitiveAssessments(userId, assistantMsgId, conversationId, analysis.cognitiveChecks);
+    }
+    if (analysis.isAnomaly && analysis.analysisNote) {
+      await markAnomaly(assistantMsgId, analysis.analysisNote);
+    }
+  } catch (e) {
+    console.warn("Cognitive analysis failed:", e);
   }
+}
+
+// ─── 핸들러 ─────────────────────────────────────────────────────────────────
+
+/** 1) 최초 인사 */
+async function handleFirstGreeting(systemPrompt: string, userName: string, honorific: string, conversationId?: string) {
+  const model = getTextModel(systemPrompt);
+  const res = await model.generateContent(
+    `지금 ${userName}님이 대화를 시작합니다. 손녀 '민지'로서 ${honorific}을 부르며 시간대에 맞는 인사 한 마디만 짧게 해주세요. (본인 소개 포함)`,
+  );
+  const text = res.response.text();
+  if (conversationId) await saveGreetingMessage(conversationId, text);
   return NextResponse.json({ text, role: "assistant" });
 }
 
-/** 1-B) 재접속 인사 (기존 사용자가 시간이 지나서 다시 옴) */
-async function handleReturningGreeting(
-  systemPrompt: string,
-  userName: string,
-  honorific: string,
-  conversationId?: string,
-) {
+/** 2) 재접속 인사 */
+async function handleReturningGreeting(systemPrompt: string, userName: string, honorific: string, conversationId?: string) {
   const model = getTextModel(systemPrompt);
-  const prompt = `${userName}(${honorific})님이 다시 돌아왔습니다. 손녀 '민지'로서 따뜻하게 반겨주세요.
-
-[지시사항]
-- "다시 와주셨네요" 또는 "보고 싶었어요" 같은 자연스러운 재인사를 해주세요. 처음 만난 것처럼 자기소개를 다시 하지 마세요.
-- [현재 환경 정보]를 반영해 시간대에 맞는 질문을 하세요 (아침→아침 식사, 점심→점심, 저녁→저녁 식사/하루 정리).
-- [인지 선별 안내]에 아직 확인하지 않은 영역이 있으면, 자연스러운 대화 안에 하나만 녹여서 질문하세요.
-  예시:
-  - 시간 지남력: "오늘이 무슨 요일인지 민지가 깜빡했어요~"
-  - 장소 지남력: "지금 집에 계세요?"
-  - 기억력: "지난번에 ○○ 좋아하신다고 하셨는데, 요즘도 드세요?"
-  - 판단력: "오늘 밖에 나가시면 뭘 입으실 거예요?"
-- 인지 질문을 억지로 끼워넣지 말고, 맥락에 맞을 때만 자연스럽게 포함하세요.
-- 전체 답변은 2~3문장으로 짧게 해주세요.`;
-
-  const res = await model.generateContent(prompt);
+  const res = await model.generateContent(
+    `${userName}(${honorific})님이 다시 돌아왔습니다. 자기소개 반복하지 말고, "다시 와주셨네요" 스타일로 따뜻하게 반겨주세요. 시간대에 맞는 질문 하나 포함. 2~3문장.`,
+  );
   const text = res.response.text();
-
-  if (conversationId) {
-    await saveGreetingMessage(conversationId, text);
-  }
+  if (conversationId) await saveGreetingMessage(conversationId, text);
   return NextResponse.json({ text, role: "assistant" });
 }
 
-/** 2) 날짜/시간 질문 직접 응답 (Gemini 미호출) */
-async function handleDateTimeQuestion(
-  userMessage: string,
-  honorific: string,
-  conversationId: string | undefined,
-  clientTimeIso?: string,
-) {
+/** 3) 날짜/시간 질문 직접 응답 */
+async function handleDateTimeQuestion(userMessage: string, honorific: string, conversationId: string | undefined, userId: string, clientTimeIso?: string) {
   const timeStr = getCurrentKstDateTimeString(clientTimeIso);
   const replyText = `${honorific}님, 지금은 한국 시각으로 ${timeStr}이에요.`;
-
   if (conversationId) {
-    await saveMessages({
-      conversationId,
-      userId: "", // 시간 응답에는 health log 불필요
-      userContent: userMessage,
-      assistantContent: replyText,
-      isAnomaly: false,
-      analysisNote: null,
-    });
+    await saveMessages({ conversationId, userId, userContent: userMessage, assistantContent: replyText });
   }
   return NextResponse.json({ text: replyText, role: "assistant" });
 }
 
-/** 3) 음성(멀티모달) 요청 */
+/** 4) 음성 요청 (JSON 모델) */
 async function handleAudioMessage(params: {
-  systemPrompt: string;
-  honorific: string;
-  userName: string;
-  userId: string;
-  conversationId?: string;
-  audioData: string;
-  audioMimeType: string;
-  historyText: string;
-  memories: string;
+  systemPrompt: string; envBlock: string; honorific: string; userName: string;
+  userId: string; conversationId?: string;
+  audioData: string; audioMimeType: string; historyText: string; memories: string;
 }) {
-  const { systemPrompt, honorific, userName, userId, conversationId, audioData, audioMimeType, historyText, memories } = params;
+  const { systemPrompt, envBlock, honorific, userName, userId, conversationId, audioData, audioMimeType, historyText, memories } = params;
   const model = getJsonModel(systemPrompt);
 
   const parts: Part[] = [];
-
   if (historyText || memories) {
-    parts.push({
-      text: [
-        memories ? `과거 맥락 (이 사용자가 예전에 말한 내용):\n${memories}\n` : "",
-        historyText ? `지금까지의 대화 내역:\n${historyText}\n` : "",
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    });
+    parts.push({ text: [memories ? `과거 맥락:\n${memories}\n` : "", historyText ? `대화 내역:\n${historyText}\n` : ""].filter(Boolean).join("\n") });
   }
-
   parts.push({
-    text: `아래 음성은 ${honorific} ${userName}님이 방금 하신 말씀입니다. 음성을 듣고 상황을 이해한 뒤, 손녀 '민지'로서 ${honorific}을/를 부르며 따뜻하게 대답해 주세요.
-${memories ? "[지시] 위 '과거 맥락'에 사용자가 예전에 말한 내용이 있으면, '기억나니?' 등으로 물어보면 그 내용을 활용해 답하세요.\n" : ""}[지시] 위 "지금까지의 대화 내역"에서 사용자가 이미 답한 내용(식사·수면·기분 등)은 다시 묻지 말고, 아직 안 물어본 주제로만 질문하세요.
-
-JSON 응답 형식:
-{
-  "transcription": "사용자의 음성을 한국어로 정확하게 받아 적은 문장",
-  "text": "transcription을 기반으로 한 당신의 대답 문장",
-  "isAnomaly": false,
-  "analysisNote": "",
-  "cognitiveChecks": []
-}
-cognitiveChecks 배열에는 이번 대화에서 관찰/평가한 인지 영역을 기록하세요.
-각 항목: {"domain": "영역명", "score": 0~2, "confidence": 0.0~1.0, "evidence": "근거 발화", "note": "판단 사유"}
-평가할 것이 없으면 빈 배열로 두세요.`,
+    text: `음성은 ${honorific} ${userName}님의 말씀입니다. 손녀 '민지'로서 따뜻하게 대답하세요.
+JSON: {"transcription": "받아쓰기", "text": "대답 2~3문장"}`,
   });
-
   parts.push({ inlineData: { mimeType: audioMimeType, data: audioData } });
 
-  const res = await model.generateContent({
-    contents: [{ role: "user", parts }],
-  });
+  const res = await model.generateContent({ contents: [{ role: "user", parts }] });
+  const raw = res.response.text().trim();
 
-  const parsed = parseGeminiResponse(res.response.text().trim());
+  let transcription = "";
+  let answerText = raw;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (typeof parsed.transcription === "string") transcription = parsed.transcription;
+    if (typeof parsed.text === "string") answerText = parsed.text;
+  } catch { /* raw text fallback */ }
 
   if (conversationId) {
-    await saveMessages({
-      conversationId,
-      userId,
-      userContent: parsed.transcription || "(음성 메시지)",
-      assistantContent: parsed.text,
-      isAnomaly: parsed.isAnomaly,
-      analysisNote: parsed.analysisNote,
-      cognitiveChecks: parsed.cognitiveChecks,
+    const { assistantMsgId } = await saveMessages({
+      conversationId, userId,
+      userContent: transcription || "(음성 메시지)",
+      assistantContent: answerText,
     });
+    // 인지 분석 (await — 완료 후 응답)
+    await runCognitiveAnalysis({ userId, conversationId, assistantMsgId, userMessage: transcription, assistantResponse: answerText, historyText, envBlock });
   }
 
-  return NextResponse.json({
-    text: parsed.text,
-    transcription: parsed.transcription ?? "",
-    role: "assistant",
-  });
+  return NextResponse.json({ text: answerText, transcription, role: "assistant" });
 }
 
-/** 4) 텍스트 기반 요청 — TextModel(Google Search 가능) + JSON 프롬프트 */
+/** 5) 텍스트 요청 (텍스트 모델 — 순수 텍스트 응답) */
 async function handleTextMessage(params: {
-  systemPrompt: string;
-  environmentContext: string;
-  userId: string;
-  conversationId?: string;
-  userContent: string;
-  historyText: string;
-  memories: string;
+  systemPrompt: string; envBlock: string;
+  userId: string; conversationId?: string;
+  userContent: string; historyText: string; memories: string;
 }) {
-  const { systemPrompt, userId, conversationId, userContent, historyText, memories } = params;
+  const { systemPrompt, envBlock, userId, conversationId, userContent, historyText, memories } = params;
   const model = getTextModel(systemPrompt);
 
-  const prompt = `${memories ? `과거 맥락 (이 사용자가 예전 대화에서 말한 내용):\n${memories}\n[지시] 사용자가 "기억나니?", "아까 말한 거" 등으로 물어보면 위 과거 맥락에서 해당 정보를 찾아 답하세요.\n` : ""}
+  const prompt = `${memories ? `과거 맥락:\n${memories}\n` : ""}
 대화 내역:
 ${historyText}
 
-[지시] 위 대화 내역을 반드시 참고하세요. 사용자가 이미 답한 내용(식사·수면·기분 등)은 다시 묻지 말고, 아직 안 물어본 주제로만 질문하세요.
-
-반드시 아래 JSON 형식으로만 응답하세요. JSON 외에 다른 텍스트를 절대 포함하지 마세요:
-{"text": "사용자에게 할 따뜻한 대답 (2~3문장)", "isAnomaly": false, "analysisNote": "", "cognitiveChecks": []}
-
-필드 설명:
-- text: 자연스러운 한국어 대화. JSON이나 기술 용어를 text 안에 넣지 마세요.
-- isAnomaly: 사용자가 날짜/월/요일/년도를 명백히 틀리게 말하거나, 현재 날씨와 명백히 다른 말을 했으면 true. 그 외 false.
-- analysisNote: isAnomaly가 true일 때 사유. false면 빈 문자열.
-- cognitiveChecks: 이번 대화에서 관찰한 인지 영역. 각 항목: {"domain": "영역명", "score": 0~2, "confidence": 0.0~1.0, "evidence": "근거 발화", "note": "판단 사유"}. 없으면 빈 배열.
-JSON만 출력하세요.`;
+사용자가 이미 답한 내용은 다시 묻지 말고 아직 안 물어본 주제로 질문하세요.`;
 
   const res = await model.generateContent(prompt);
-  const parsed = parseGeminiResponse(res.response.text().trim());
+  const text = res.response.text().trim();
 
   if (conversationId && userContent) {
-    await saveMessages({
-      conversationId,
-      userId,
-      userContent,
-      assistantContent: parsed.text,
-      isAnomaly: parsed.isAnomaly,
-      analysisNote: parsed.analysisNote,
-      cognitiveChecks: parsed.cognitiveChecks,
-    });
+    const { assistantMsgId } = await saveMessages({ conversationId, userId, userContent, assistantContent: text });
+    // 인지 분석 (await — 완료 후 응답)
+    await runCognitiveAnalysis({ userId, conversationId, assistantMsgId, userMessage: userContent, assistantResponse: text, historyText, envBlock });
   }
 
-  return NextResponse.json({ text: parsed.text, role: "assistant" });
+  return NextResponse.json({ text, role: "assistant" });
 }
 
-// ─── POST handler ───────────────────────────────────────────────────────────
+// ─── POST ───────────────────────────────────────────────────────────────────
 
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
@@ -279,66 +194,38 @@ export async function POST(req: Request) {
 
   try {
     const body = (await req.json()) as ChatRequestBody;
-    const { messages, conversationId, isInitialGreeting, isReturningGreeting, audio, context: clientContext } = body;
+    const { messages, conversationId, isInitialGreeting, isReturningGreeting, audio, context: ctx } = body;
     const userId = session.user.id;
 
-    // 공통: 시간 + 날씨 + 시스템 프롬프트 조립
-    const timeCtx = getTimeContext(clientContext?.currentTime);
-    const weatherCtx = await getWeatherContext(clientContext?.latitude, clientContext?.longitude);
-    const { systemPrompt, userName, honorific, environmentContext } = await buildSystemPrompt({
-      userId,
-      conversationId,
-      timeCtx,
-      weather: weatherCtx,
+    const timeCtx = getTimeContext(ctx?.currentTime);
+    const weatherCtx = await getWeatherContext(ctx?.latitude, ctx?.longitude);
+    const { systemPrompt, envBlock, userName, honorific } = await buildSystemPrompt({
+      userId, conversationId, timeCtx, weather: weatherCtx,
     });
 
-    // 1) 인사
-    if (isInitialGreeting) {
-      return handleFirstGreeting(systemPrompt, userName, honorific, conversationId);
-    }
-    if (isReturningGreeting) {
-      return handleReturningGreeting(systemPrompt, userName, honorific, conversationId);
-    }
+    if (isInitialGreeting) return handleFirstGreeting(systemPrompt, userName, honorific, conversationId);
+    if (isReturningGreeting) return handleReturningGreeting(systemPrompt, userName, honorific, conversationId);
 
-    // 공통: RAG 검색 + 히스토리 텍스트
     const lastUserMessage = messages?.filter((m) => m.role === "user").pop()?.content ?? "";
     const [memories, historyText] = await Promise.all([
       fetchMemories(userId, lastUserMessage),
       Promise.resolve(buildHistoryText(messages ?? [])),
     ]);
 
-    // 2) 날짜/시간 질문 → 서버에서 바로 응답
     if (!audio?.data && lastUserMessage && isDateTimeQuestion(lastUserMessage)) {
-      return handleDateTimeQuestion(lastUserMessage, honorific, conversationId, clientContext?.currentTime);
+      return handleDateTimeQuestion(lastUserMessage, honorific, conversationId, userId, ctx?.currentTime);
     }
 
-    // 3) 음성 입력
     if (audio?.data && audio?.mimeType) {
       return handleAudioMessage({
-        systemPrompt,
-        honorific,
-        userName,
-        userId,
-        conversationId,
-        audioData: audio.data,
-        audioMimeType: audio.mimeType,
-        historyText,
-        memories,
+        systemPrompt, envBlock, honorific, userName, userId, conversationId,
+        audioData: audio.data, audioMimeType: audio.mimeType, historyText, memories,
       });
     }
 
-    // 4) 텍스트 입력
-    return handleTextMessage({
-      systemPrompt,
-      environmentContext,
-      userId,
-      conversationId,
-      userContent: lastUserMessage,
-      historyText,
-      memories,
-    });
+    return handleTextMessage({ systemPrompt, envBlock, userId, conversationId, userContent: lastUserMessage, historyText, memories });
   } catch (e) {
     console.error("chat api error", e);
-    return NextResponse.json({ error: toSafeErrorMessage(e) }, { status: 500 });
+    return NextResponse.json({ error: toSafeError(e) }, { status: 500 });
   }
 }

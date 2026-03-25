@@ -56,8 +56,7 @@ export const ModelName = {
   Session: 'Session',
   VerificationToken: 'VerificationToken',
   Conversation: 'Conversation',
-  Message: 'Message',
-  HealthLog: 'HealthLog'
+  Message: 'Message'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -149,19 +148,6 @@ export const MessageScalarFieldEnum = {
 } as const
 
 export type MessageScalarFieldEnum = (typeof MessageScalarFieldEnum)[keyof typeof MessageScalarFieldEnum]
-
-
-export const HealthLogScalarFieldEnum = {
-  id: 'id',
-  userId: 'userId',
-  conversationId: 'conversationId',
-  type: 'type',
-  value: 'value',
-  note: 'note',
-  createdAt: 'createdAt'
-} as const
-
-export type HealthLogScalarFieldEnum = (typeof HealthLogScalarFieldEnum)[keyof typeof HealthLogScalarFieldEnum]
 
 
 export const SortOrder = {

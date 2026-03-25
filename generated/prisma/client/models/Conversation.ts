@@ -184,7 +184,6 @@ export type ConversationWhereInput = {
   updatedAt?: Prisma.DateTimeFilter<"Conversation"> | Date | string
   user?: Prisma.XOR<Prisma.UserScalarRelationFilter, Prisma.UserWhereInput>
   messages?: Prisma.MessageListRelationFilter
-  healthLogs?: Prisma.HealthLogListRelationFilter
 }
 
 export type ConversationOrderByWithRelationInput = {
@@ -195,7 +194,6 @@ export type ConversationOrderByWithRelationInput = {
   updatedAt?: Prisma.SortOrder
   user?: Prisma.UserOrderByWithRelationInput
   messages?: Prisma.MessageOrderByRelationAggregateInput
-  healthLogs?: Prisma.HealthLogOrderByRelationAggregateInput
 }
 
 export type ConversationWhereUniqueInput = Prisma.AtLeast<{
@@ -209,7 +207,6 @@ export type ConversationWhereUniqueInput = Prisma.AtLeast<{
   updatedAt?: Prisma.DateTimeFilter<"Conversation"> | Date | string
   user?: Prisma.XOR<Prisma.UserScalarRelationFilter, Prisma.UserWhereInput>
   messages?: Prisma.MessageListRelationFilter
-  healthLogs?: Prisma.HealthLogListRelationFilter
 }, "id" | "userId">
 
 export type ConversationOrderByWithAggregationInput = {
@@ -241,7 +238,6 @@ export type ConversationCreateInput = {
   updatedAt?: Date | string
   user: Prisma.UserCreateNestedOneWithoutConversationsInput
   messages?: Prisma.MessageCreateNestedManyWithoutConversationInput
-  healthLogs?: Prisma.HealthLogCreateNestedManyWithoutConversationInput
 }
 
 export type ConversationUncheckedCreateInput = {
@@ -251,7 +247,6 @@ export type ConversationUncheckedCreateInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   messages?: Prisma.MessageUncheckedCreateNestedManyWithoutConversationInput
-  healthLogs?: Prisma.HealthLogUncheckedCreateNestedManyWithoutConversationInput
 }
 
 export type ConversationUpdateInput = {
@@ -261,7 +256,6 @@ export type ConversationUpdateInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   user?: Prisma.UserUpdateOneRequiredWithoutConversationsNestedInput
   messages?: Prisma.MessageUpdateManyWithoutConversationNestedInput
-  healthLogs?: Prisma.HealthLogUpdateManyWithoutConversationNestedInput
 }
 
 export type ConversationUncheckedUpdateInput = {
@@ -271,7 +265,6 @@ export type ConversationUncheckedUpdateInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   messages?: Prisma.MessageUncheckedUpdateManyWithoutConversationNestedInput
-  healthLogs?: Prisma.HealthLogUncheckedUpdateManyWithoutConversationNestedInput
 }
 
 export type ConversationCreateManyInput = {
@@ -336,11 +329,6 @@ export type ConversationScalarRelationFilter = {
   isNot?: Prisma.ConversationWhereInput
 }
 
-export type ConversationNullableScalarRelationFilter = {
-  is?: Prisma.ConversationWhereInput | null
-  isNot?: Prisma.ConversationWhereInput | null
-}
-
 export type ConversationCreateNestedManyWithoutUserInput = {
   create?: Prisma.XOR<Prisma.ConversationCreateWithoutUserInput, Prisma.ConversationUncheckedCreateWithoutUserInput> | Prisma.ConversationCreateWithoutUserInput[] | Prisma.ConversationUncheckedCreateWithoutUserInput[]
   connectOrCreate?: Prisma.ConversationCreateOrConnectWithoutUserInput | Prisma.ConversationCreateOrConnectWithoutUserInput[]
@@ -397,29 +385,12 @@ export type ConversationUpdateOneRequiredWithoutMessagesNestedInput = {
   update?: Prisma.XOR<Prisma.XOR<Prisma.ConversationUpdateToOneWithWhereWithoutMessagesInput, Prisma.ConversationUpdateWithoutMessagesInput>, Prisma.ConversationUncheckedUpdateWithoutMessagesInput>
 }
 
-export type ConversationCreateNestedOneWithoutHealthLogsInput = {
-  create?: Prisma.XOR<Prisma.ConversationCreateWithoutHealthLogsInput, Prisma.ConversationUncheckedCreateWithoutHealthLogsInput>
-  connectOrCreate?: Prisma.ConversationCreateOrConnectWithoutHealthLogsInput
-  connect?: Prisma.ConversationWhereUniqueInput
-}
-
-export type ConversationUpdateOneWithoutHealthLogsNestedInput = {
-  create?: Prisma.XOR<Prisma.ConversationCreateWithoutHealthLogsInput, Prisma.ConversationUncheckedCreateWithoutHealthLogsInput>
-  connectOrCreate?: Prisma.ConversationCreateOrConnectWithoutHealthLogsInput
-  upsert?: Prisma.ConversationUpsertWithoutHealthLogsInput
-  disconnect?: Prisma.ConversationWhereInput | boolean
-  delete?: Prisma.ConversationWhereInput | boolean
-  connect?: Prisma.ConversationWhereUniqueInput
-  update?: Prisma.XOR<Prisma.XOR<Prisma.ConversationUpdateToOneWithWhereWithoutHealthLogsInput, Prisma.ConversationUpdateWithoutHealthLogsInput>, Prisma.ConversationUncheckedUpdateWithoutHealthLogsInput>
-}
-
 export type ConversationCreateWithoutUserInput = {
   id?: string
   title?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   messages?: Prisma.MessageCreateNestedManyWithoutConversationInput
-  healthLogs?: Prisma.HealthLogCreateNestedManyWithoutConversationInput
 }
 
 export type ConversationUncheckedCreateWithoutUserInput = {
@@ -428,7 +399,6 @@ export type ConversationUncheckedCreateWithoutUserInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   messages?: Prisma.MessageUncheckedCreateNestedManyWithoutConversationInput
-  healthLogs?: Prisma.HealthLogUncheckedCreateNestedManyWithoutConversationInput
 }
 
 export type ConversationCreateOrConnectWithoutUserInput = {
@@ -474,7 +444,6 @@ export type ConversationCreateWithoutMessagesInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   user: Prisma.UserCreateNestedOneWithoutConversationsInput
-  healthLogs?: Prisma.HealthLogCreateNestedManyWithoutConversationInput
 }
 
 export type ConversationUncheckedCreateWithoutMessagesInput = {
@@ -483,7 +452,6 @@ export type ConversationUncheckedCreateWithoutMessagesInput = {
   title?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
-  healthLogs?: Prisma.HealthLogUncheckedCreateNestedManyWithoutConversationInput
 }
 
 export type ConversationCreateOrConnectWithoutMessagesInput = {
@@ -508,7 +476,6 @@ export type ConversationUpdateWithoutMessagesInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   user?: Prisma.UserUpdateOneRequiredWithoutConversationsNestedInput
-  healthLogs?: Prisma.HealthLogUpdateManyWithoutConversationNestedInput
 }
 
 export type ConversationUncheckedUpdateWithoutMessagesInput = {
@@ -517,59 +484,6 @@ export type ConversationUncheckedUpdateWithoutMessagesInput = {
   title?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
-  healthLogs?: Prisma.HealthLogUncheckedUpdateManyWithoutConversationNestedInput
-}
-
-export type ConversationCreateWithoutHealthLogsInput = {
-  id?: string
-  title?: string | null
-  createdAt?: Date | string
-  updatedAt?: Date | string
-  user: Prisma.UserCreateNestedOneWithoutConversationsInput
-  messages?: Prisma.MessageCreateNestedManyWithoutConversationInput
-}
-
-export type ConversationUncheckedCreateWithoutHealthLogsInput = {
-  id?: string
-  userId: string
-  title?: string | null
-  createdAt?: Date | string
-  updatedAt?: Date | string
-  messages?: Prisma.MessageUncheckedCreateNestedManyWithoutConversationInput
-}
-
-export type ConversationCreateOrConnectWithoutHealthLogsInput = {
-  where: Prisma.ConversationWhereUniqueInput
-  create: Prisma.XOR<Prisma.ConversationCreateWithoutHealthLogsInput, Prisma.ConversationUncheckedCreateWithoutHealthLogsInput>
-}
-
-export type ConversationUpsertWithoutHealthLogsInput = {
-  update: Prisma.XOR<Prisma.ConversationUpdateWithoutHealthLogsInput, Prisma.ConversationUncheckedUpdateWithoutHealthLogsInput>
-  create: Prisma.XOR<Prisma.ConversationCreateWithoutHealthLogsInput, Prisma.ConversationUncheckedCreateWithoutHealthLogsInput>
-  where?: Prisma.ConversationWhereInput
-}
-
-export type ConversationUpdateToOneWithWhereWithoutHealthLogsInput = {
-  where?: Prisma.ConversationWhereInput
-  data: Prisma.XOR<Prisma.ConversationUpdateWithoutHealthLogsInput, Prisma.ConversationUncheckedUpdateWithoutHealthLogsInput>
-}
-
-export type ConversationUpdateWithoutHealthLogsInput = {
-  id?: Prisma.StringFieldUpdateOperationsInput | string
-  title?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
-  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
-  user?: Prisma.UserUpdateOneRequiredWithoutConversationsNestedInput
-  messages?: Prisma.MessageUpdateManyWithoutConversationNestedInput
-}
-
-export type ConversationUncheckedUpdateWithoutHealthLogsInput = {
-  id?: Prisma.StringFieldUpdateOperationsInput | string
-  userId?: Prisma.StringFieldUpdateOperationsInput | string
-  title?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
-  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
-  messages?: Prisma.MessageUncheckedUpdateManyWithoutConversationNestedInput
 }
 
 export type ConversationCreateManyUserInput = {
@@ -585,7 +499,6 @@ export type ConversationUpdateWithoutUserInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   messages?: Prisma.MessageUpdateManyWithoutConversationNestedInput
-  healthLogs?: Prisma.HealthLogUpdateManyWithoutConversationNestedInput
 }
 
 export type ConversationUncheckedUpdateWithoutUserInput = {
@@ -594,7 +507,6 @@ export type ConversationUncheckedUpdateWithoutUserInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   messages?: Prisma.MessageUncheckedUpdateManyWithoutConversationNestedInput
-  healthLogs?: Prisma.HealthLogUncheckedUpdateManyWithoutConversationNestedInput
 }
 
 export type ConversationUncheckedUpdateManyWithoutUserInput = {
@@ -611,12 +523,10 @@ export type ConversationUncheckedUpdateManyWithoutUserInput = {
 
 export type ConversationCountOutputType = {
   messages: number
-  healthLogs: number
 }
 
 export type ConversationCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   messages?: boolean | ConversationCountOutputTypeCountMessagesArgs
-  healthLogs?: boolean | ConversationCountOutputTypeCountHealthLogsArgs
 }
 
 /**
@@ -636,13 +546,6 @@ export type ConversationCountOutputTypeCountMessagesArgs<ExtArgs extends runtime
   where?: Prisma.MessageWhereInput
 }
 
-/**
- * ConversationCountOutputType without action
- */
-export type ConversationCountOutputTypeCountHealthLogsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
-  where?: Prisma.HealthLogWhereInput
-}
-
 
 export type ConversationSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
@@ -652,7 +555,6 @@ export type ConversationSelect<ExtArgs extends runtime.Types.Extensions.Internal
   updatedAt?: boolean
   user?: boolean | Prisma.UserDefaultArgs<ExtArgs>
   messages?: boolean | Prisma.Conversation$messagesArgs<ExtArgs>
-  healthLogs?: boolean | Prisma.Conversation$healthLogsArgs<ExtArgs>
   _count?: boolean | Prisma.ConversationCountOutputTypeDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["conversation"]>
 
@@ -686,7 +588,6 @@ export type ConversationOmit<ExtArgs extends runtime.Types.Extensions.InternalAr
 export type ConversationInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   user?: boolean | Prisma.UserDefaultArgs<ExtArgs>
   messages?: boolean | Prisma.Conversation$messagesArgs<ExtArgs>
-  healthLogs?: boolean | Prisma.Conversation$healthLogsArgs<ExtArgs>
   _count?: boolean | Prisma.ConversationCountOutputTypeDefaultArgs<ExtArgs>
 }
 export type ConversationIncludeCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
@@ -701,7 +602,6 @@ export type $ConversationPayload<ExtArgs extends runtime.Types.Extensions.Intern
   objects: {
     user: Prisma.$UserPayload<ExtArgs>
     messages: Prisma.$MessagePayload<ExtArgs>[]
-    healthLogs: Prisma.$HealthLogPayload<ExtArgs>[]
   }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
@@ -1105,7 +1005,6 @@ export interface Prisma__ConversationClient<T, Null = never, ExtArgs extends run
   readonly [Symbol.toStringTag]: "PrismaPromise"
   user<T extends Prisma.UserDefaultArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.UserDefaultArgs<ExtArgs>>): Prisma.Prisma__UserClient<runtime.Types.Result.GetResult<Prisma.$UserPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
   messages<T extends Prisma.Conversation$messagesArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Conversation$messagesArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$MessagePayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
-  healthLogs<T extends Prisma.Conversation$healthLogsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Conversation$healthLogsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$HealthLogPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
    * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -1557,30 +1456,6 @@ export type Conversation$messagesArgs<ExtArgs extends runtime.Types.Extensions.I
   take?: number
   skip?: number
   distinct?: Prisma.MessageScalarFieldEnum | Prisma.MessageScalarFieldEnum[]
-}
-
-/**
- * Conversation.healthLogs
- */
-export type Conversation$healthLogsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
-  /**
-   * Select specific fields to fetch from the HealthLog
-   */
-  select?: Prisma.HealthLogSelect<ExtArgs> | null
-  /**
-   * Omit specific fields from the HealthLog
-   */
-  omit?: Prisma.HealthLogOmit<ExtArgs> | null
-  /**
-   * Choose, which related nodes to fetch as well
-   */
-  include?: Prisma.HealthLogInclude<ExtArgs> | null
-  where?: Prisma.HealthLogWhereInput
-  orderBy?: Prisma.HealthLogOrderByWithRelationInput | Prisma.HealthLogOrderByWithRelationInput[]
-  cursor?: Prisma.HealthLogWhereUniqueInput
-  take?: number
-  skip?: number
-  distinct?: Prisma.HealthLogScalarFieldEnum | Prisma.HealthLogScalarFieldEnum[]
 }
 
 /**

@@ -71,8 +71,3 @@ export type Conversation = Prisma.ConversationModel
  * 
  */
 export type Message = Prisma.MessageModel
-/**
- * Model HealthLog
- * 
- */
-export type HealthLog = Prisma.HealthLogModel
