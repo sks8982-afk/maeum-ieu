@@ -26,7 +26,7 @@ function getTextModel(systemInstruction: string) {
     systemInstruction,
     generationConfig: {
       temperature: 0.7,
-      maxOutputTokens: 1024,
+      maxOutputTokens: 2048,
     },
     // @ts-expect-error -- googleSearch 도구는 REST API에서 지원하지만 SDK 타입에 아직 미반영
     tools: [{ googleSearch: {} }],
@@ -40,7 +40,7 @@ function getJsonModel(systemInstruction: string) {
     systemInstruction,
     generationConfig: {
       temperature: 0.7,
-      maxOutputTokens: 1024,
+      maxOutputTokens: 2048,
       responseMimeType: "application/json",
     },
     // @ts-expect-error -- googleSearch 도구는 REST API에서 지원하지만 SDK 타입에 아직 미반영
@@ -258,40 +258,39 @@ ${historyText}
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text })}\n\n`));
           }
         }
+
+        // 스트림 완료 → [DONE] 보내기 전에 DB 저장 완료
+        if (conversationId && userContent) {
+          try {
+            const { assistantMsg } = await saveMessages({
+              conversationId,
+              userId,
+              userContent,
+              assistantContent: fullText,
+              isAnomaly: false,
+              analysisNote: null,
+            });
+
+            // 인지 분석은 저장 후 비동기로 (이건 늦어도 됨)
+            analyzeCognitive({
+              userMessage: userContent,
+              assistantResponse: fullText,
+              historyText,
+              environmentInfo: systemPrompt.split("[인지 선별 프로토콜")[0].trim(),
+            }).then((checks) => {
+              if (checks.length > 0) {
+                saveCognitiveAssessments(userId, assistantMsg.id, conversationId, checks).catch((e) =>
+                  console.warn("Cognitive save failed:", e),
+                );
+              }
+            }).catch((e) => console.warn("Cognitive analysis failed:", e));
+          } catch (e) {
+            console.error("DB save after stream failed:", e);
+          }
+        }
+
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         controller.close();
-
-        // 스트림 종료 후 DB 저장 + 비동기 인지 분석 (응답에 영향 없음)
-        if (conversationId && userContent) {
-          (async () => {
-            try {
-              // 1) 메시지 저장
-              const { assistantMsg } = await saveMessages({
-                conversationId,
-                userId,
-                userContent,
-                assistantContent: fullText,
-                isAnomaly: false,
-                analysisNote: null,
-              });
-
-              // 2) 인지 분석 (별도 경량 Gemini 호출)
-              const checks = await analyzeCognitive({
-                userMessage: userContent,
-                assistantResponse: fullText,
-                historyText,
-                environmentInfo: systemPrompt.split("[인지 선별 프로토콜")[0].trim(),
-              });
-
-              // 3) 분석 결과가 있으면 cognitive_assessments에 직접 저장
-              if (checks.length > 0) {
-                await saveCognitiveAssessments(userId, assistantMsg.id, conversationId, checks);
-              }
-            } catch (e) {
-              console.error("Post-stream processing failed:", e);
-            }
-          })();
-        }
       } catch (e) {
         console.error("stream error:", e);
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: "스트리밍 중 오류가 발생했습니다." })}\n\n`));
