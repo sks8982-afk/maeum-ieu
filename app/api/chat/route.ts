@@ -8,7 +8,8 @@ import { getTimeContext, getCurrentKstDateTimeString, isDateTimeQuestion } from 
 import { getWeatherContext } from "@/lib/chat/weather";
 import { buildSystemPrompt } from "@/lib/chat/prompt";
 import { parseGeminiResponse } from "@/lib/chat/parser";
-import { saveMessages, saveGreetingMessage } from "@/lib/chat/messages";
+import { saveMessages, saveGreetingMessage, saveCognitiveAssessments } from "@/lib/chat/messages";
+import { analyzeCognitive } from "@/lib/chat/cognitive-analyzer";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -157,8 +158,12 @@ JSON 응답 형식:
   "transcription": "사용자의 음성을 한국어로 정확하게 받아 적은 문장",
   "text": "transcription을 기반으로 한 당신의 대답 문장",
   "isAnomaly": false,
-  "analysisNote": ""
-}`,
+  "analysisNote": "",
+  "cognitiveChecks": []
+}
+cognitiveChecks 배열에는 이번 대화에서 관찰/평가한 인지 영역을 기록하세요.
+각 항목: {"domain": "영역명", "score": 0~2, "confidence": 0.0~1.0, "evidence": "근거 발화", "note": "판단 사유"}
+평가할 것이 없으면 빈 배열로 두세요.`,
   });
 
   parts.push({ inlineData: { mimeType: audioMimeType, data: audioData } });
@@ -177,6 +182,7 @@ JSON 응답 형식:
       assistantContent: parsed.text,
       isAnomaly: parsed.isAnomaly,
       analysisNote: parsed.analysisNote,
+      cognitiveChecks: parsed.cognitiveChecks,
     });
   }
 
@@ -224,16 +230,36 @@ ${historyText}
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         controller.close();
 
-        // 스트림 종료 후 DB 저장 (비동기, 응답에 영향 없음)
+        // 스트림 종료 후 DB 저장 + 비동기 인지 분석 (응답에 영향 없음)
         if (conversationId && userContent) {
-          saveMessages({
-            conversationId,
-            userId,
-            userContent,
-            assistantContent: fullText,
-            isAnomaly: false,
-            analysisNote: null,
-          }).catch((e) => console.error("DB save after stream failed:", e));
+          (async () => {
+            try {
+              // 1) 메시지 저장
+              const { assistantMsg } = await saveMessages({
+                conversationId,
+                userId,
+                userContent,
+                assistantContent: fullText,
+                isAnomaly: false,
+                analysisNote: null,
+              });
+
+              // 2) 인지 분석 (별도 경량 Gemini 호출)
+              const checks = await analyzeCognitive({
+                userMessage: userContent,
+                assistantResponse: fullText,
+                historyText,
+                environmentInfo: systemPrompt.split("[인지 선별 프로토콜")[0].trim(),
+              });
+
+              // 3) 분석 결과가 있으면 cognitive_assessments에 직접 저장
+              if (checks.length > 0) {
+                await saveCognitiveAssessments(userId, assistantMsg.id, conversationId, checks);
+              }
+            } catch (e) {
+              console.error("Post-stream processing failed:", e);
+            }
+          })();
         }
       } catch (e) {
         console.error("stream error:", e);
