@@ -99,6 +99,8 @@ export interface PromptParts {
   systemPrompt: string;
   userName: string;
   honorific: string;
+  /** 인지 분석기에 전달할 환경 정보 (시간, 날씨, 사용자 정보만. 대화 지시 제외) */
+  environmentContext: string;
 }
 
 /** 전체 시스템 프롬프트를 조립하여 반환 */
@@ -140,5 +142,8 @@ export async function buildSystemPrompt(params: {
     COGNITIVE_DETECTION_RULE,
   ].filter(Boolean).join("\n\n");
 
-  return { systemPrompt, userName, honorific };
+  // 인지 분석기용 환경 컨텍스트 (대화 지시/JSON 금지 같은 규칙 제외, 순수 환경 정보만)
+  const environmentContext = [userBlock, contextBlock, dateAwareBlock].filter(Boolean).join("\n");
+
+  return { systemPrompt, userName, honorific, environmentContext };
 }
