@@ -8,11 +8,17 @@ export function getTimeContext(clientTimeIso?: string): TimeContext {
   const now = clientTimeIso ? new Date(clientTimeIso) : new Date();
   const kr = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
   const hour = kr.getHours();
-  const dateStr = kr.toLocaleDateString("ko-KR", {
+  const minute = kr.getMinutes();
+
+  // "2026년 3월 25일 수요일 오후 3시 30분" 형태로 구체적으로 전달
+  const dateStr = now.toLocaleString("ko-KR", {
     timeZone: "Asia/Seoul",
-    weekday: "long",
+    year: "numeric",
     month: "long",
     day: "numeric",
+    weekday: "long",
+    hour: "numeric",
+    minute: "2-digit",
   });
 
   let timeLabel = "오후";

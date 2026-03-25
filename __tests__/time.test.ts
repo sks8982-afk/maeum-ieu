@@ -41,10 +41,11 @@ describe("getTimeContext", () => {
     expect(ctx.hour).toBe(19);
   });
 
-  it("dateStr에 한국어 날짜가 포함된다", () => {
+  it("dateStr에 한국어 날짜와 시각이 포함된다", () => {
     const ctx = getTimeContext("2026-03-24T03:00:00Z");
-    // KST 2026-03-24 12:00 → "3월 24일 화요일" 형태
+    // KST 2026-03-24 12:00 → "2026년 3월 24일 화요일 오후 12:00" 형태
     expect(ctx.dateStr).toContain("3월");
     expect(ctx.dateStr).toContain("24일");
+    expect(ctx.dateStr).toContain("2026년");
   });
 });

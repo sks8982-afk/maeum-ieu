@@ -15,11 +15,13 @@ export function getHonorific(age: number | null, gender: string | null): string 
 
 /** 환경 컨텍스트 블록 (프롬프트 삽입용) */
 function buildContextBlock(timeCtx: TimeContext, weather: WeatherContext): string {
-  return `[현재 환경 정보]
-- 현재 시각대: ${timeCtx.timeLabel} (${timeCtx.dateStr})
+  return `[현재 환경 정보 — 이 정보는 실시간 서버 데이터이며 반드시 신뢰하세요]
+- 현재 한국 시각: ${timeCtx.dateStr}
+- 시간대: ${timeCtx.timeLabel}
 - ${weather.promptText}
 
-위 정보를 활용해 "점심 드셨나요?", "오늘 날씨가 좋은데 산책 어떠세요?"처럼 구체적인 선제적 질문을 해 주세요.`;
+중요: 날짜, 요일, 시각을 말할 때는 반드시 위 정보를 그대로 사용하세요. 자체적으로 추측하지 마세요.
+위 시간대를 활용해 "점심 드셨나요?", "오늘 날씨가 좋은데 산책 어떠세요?"처럼 시간에 맞는 질문을 해주세요.`;
 }
 
 /** 마지막 대화가 오늘과 다른 날이면 날짜 안내 블록 반환 */
