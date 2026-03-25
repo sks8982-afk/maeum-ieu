@@ -59,24 +59,37 @@ function toSafeError(e: unknown): string {
 async function runCognitiveAnalysis(params: {
   userId: string;
   conversationId: string;
-  assistantMsgId: string;
+  userMsgId: string;
   userMessage: string;
   assistantResponse: string;
   historyText: string;
   envBlock: string;
 }): Promise<void> {
-  const { userId, conversationId, assistantMsgId, userMessage, assistantResponse, historyText, envBlock } = params;
+  const { userId, conversationId, userMsgId, userMessage, assistantResponse, historyText, envBlock } = params;
   try {
     const analysis = await analyzeCognitive({ userMessage, assistantResponse, historyText, envBlock });
 
+    // Gemini가 isAnomaly: false를 줘도, score >= 2인 check가 있으면 강제 이상징후 판정
+    const hasHighScore = analysis.cognitiveChecks.some((c) => c.score >= 2);
+    const isAnomaly = analysis.isAnomaly || hasHighScore;
+
+    console.log("[cognitive-analysis]", JSON.stringify({
+      isAnomaly, geminiSaid: analysis.isAnomaly, hasHighScore,
+      checks: analysis.cognitiveChecks.length,
+    }));
+
     if (analysis.cognitiveChecks.length > 0) {
-      await saveCognitiveAssessments(userId, assistantMsgId, conversationId, analysis.cognitiveChecks);
+      await saveCognitiveAssessments(userId, userMsgId, conversationId, analysis.cognitiveChecks);
     }
-    if (analysis.isAnomaly && analysis.analysisNote) {
-      await markAnomaly(assistantMsgId, analysis.analysisNote);
+    if (isAnomaly) {
+      const note = analysis.analysisNote
+        || analysis.cognitiveChecks.filter((c) => c.score >= 2).map((c) => `[${c.domain}] ${c.note || c.evidence}`).join("; ")
+        || "인지 이상징후 감지";
+      // 사용자 메시지에 이상징후 마킹 (이상 행동은 사용자 발화)
+      await markAnomaly(userMsgId, note);
     }
   } catch (e) {
-    console.warn("Cognitive analysis failed:", e);
+    console.error("[cognitive-analysis] FAILED:", e);
   }
 }
 
@@ -145,13 +158,13 @@ JSON: {"transcription": "받아쓰기", "text": "대답 2~3문장"}`,
   } catch { /* raw text fallback */ }
 
   if (conversationId) {
-    const { assistantMsgId } = await saveMessages({
+    const { userMsgId } = await saveMessages({
       conversationId, userId,
       userContent: transcription || "(음성 메시지)",
       assistantContent: answerText,
     });
     // 인지 분석 (await — 완료 후 응답)
-    await runCognitiveAnalysis({ userId, conversationId, assistantMsgId, userMessage: transcription, assistantResponse: answerText, historyText, envBlock });
+    await runCognitiveAnalysis({ userId, conversationId, userMsgId, userMessage: transcription, assistantResponse: answerText, historyText, envBlock });
   }
 
   return NextResponse.json({ text: answerText, transcription, role: "assistant" });
@@ -176,9 +189,9 @@ ${historyText}
   const text = res.response.text().trim();
 
   if (conversationId && userContent) {
-    const { assistantMsgId } = await saveMessages({ conversationId, userId, userContent, assistantContent: text });
+    const { userMsgId } = await saveMessages({ conversationId, userId, userContent, assistantContent: text });
     // 인지 분석 (await — 완료 후 응답)
-    await runCognitiveAnalysis({ userId, conversationId, assistantMsgId, userMessage: userContent, assistantResponse: text, historyText, envBlock });
+    await runCognitiveAnalysis({ userId, conversationId, userMsgId, userMessage: userContent, assistantResponse: text, historyText, envBlock });
   }
 
   return NextResponse.json({ text, role: "assistant" });
