@@ -314,58 +314,12 @@ export default function ChatPage() {
           throw new Error(data.error ?? "오류");
         }
 
-        const contentType = res.headers.get("content-type") ?? "";
-
-        // SSE 스트리밍 응답 처리
-        if (contentType.includes("text/event-stream") && res.body) {
-          setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "" }]);
-          setLoading(false);
-
-          const reader = res.body.getReader();
-          const decoder = new TextDecoder();
-          let fullText = "";
-          let buffer = "";
-          let streamDone = false;
-
-          while (!streamDone) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-
-            const lines = buffer.split("\n");
-            buffer = lines.pop() ?? "";
-
-            for (const line of lines) {
-              if (!line.startsWith("data: ")) continue;
-              const payload = line.slice(6);
-              if (payload === "[DONE]") {
-                streamDone = true;
-                break;
-              }
-              try {
-                const { text, error } = JSON.parse(payload) as { text?: string; error?: string };
-                if (error) throw new Error(error);
-                if (text) {
-                  fullText += text;
-                  setMessages((prev) =>
-                    prev.map((m) => (m.id === assistantId ? { ...m, content: fullText } : m)),
-                  );
-                }
-              } catch {
-                // skip malformed chunk
-              }
-            }
-          }
-          if (fullText) speak(fullText);
-        } else {
-          // JSON 응답 (인사, 시간 질문 등 비스트리밍)
-          const data = await res.json();
-          setMessages((prev) => [
-            ...prev,
-            { id: assistantId, role: "assistant", content: data.text },
-          ]);
-          speak(data.text);
-        }
+        const data = await res.json();
+        setMessages((prev) => [
+          ...prev,
+          { id: assistantId, role: "assistant", content: data.text },
+        ]);
+        speak(data.text);
       } catch (e) {
         console.error("[chat] sendMessage error", e);
         const msg = getErrorMessage(e);
