@@ -15,6 +15,7 @@ export interface ChatRequestBody {
   messages?: { role: string; content: string }[];
   conversationId?: string;
   isInitialGreeting?: boolean;
+  isReturningGreeting?: boolean;
   audio?: AudioInput;
   context?: ClientContext;
 }

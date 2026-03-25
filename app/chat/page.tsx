@@ -154,9 +154,11 @@ export default function ChatPage() {
     );
   }, []);
 
-  // 진입 시: 최근 대화 불러오기. 있으면 복구, 없으면 새 대화 생성 + AI 선인사
+  // 진입 시: 최근 대화 불러오기 + 시간 경과에 따라 AI 인사
   useEffect(() => {
     if (status !== "authenticated" || conversationId !== null) return;
+
+    const RETURNING_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2시간
 
     let cancelled = false;
     (async () => {
@@ -165,12 +167,14 @@ export default function ChatPage() {
       const data = (await getRes.json()) as {
         conversation?: { id: string } | null;
         messages?: { id: string; role: string; content: string }[];
+        lastMessageAt?: string | null;
       };
       if (cancelled) return;
 
       const conv = data.conversation ?? null;
       const existingMessages = Array.isArray(data.messages) ? data.messages : [];
 
+      // 기존 대화가 있는 경우
       if (conv?.id && existingMessages.length > 0) {
         setConversationId(conv.id);
         setMessages(
@@ -180,9 +184,36 @@ export default function ChatPage() {
             content: m.content,
           }))
         );
+
+        // 마지막 메시지로부터 2시간 이상 경과 → AI 재인사
+        const lastAt = data.lastMessageAt ? new Date(data.lastMessageAt).getTime() : 0;
+        const elapsed = Date.now() - lastAt;
+
+        if (elapsed >= RETURNING_THRESHOLD_MS) {
+          const chatRes = await fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              conversationId: conv.id,
+              isReturningGreeting: true,
+              context: getContext(),
+            }),
+          });
+          if (!chatRes.ok || cancelled) return;
+          const { text } = (await chatRes.json()) as { text: string };
+          if (cancelled) return;
+          setMessages((prev) => [
+            ...prev,
+            { id: createId(), role: "assistant", content: text },
+          ]);
+          speak(text);
+          setAiSpeaking(true);
+          setTimeout(() => setAiSpeaking(false), 3000);
+        }
         return;
       }
 
+      // 새 사용자: 대화 생성 + 최초 인사
       let conversationIdToUse: string;
       if (conv?.id) {
         conversationIdToUse = conv.id;

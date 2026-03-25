@@ -77,8 +77,8 @@ function toSafeErrorMessage(e: unknown): string {
 
 // ─── 요청 핸들러별 분리 ─────────────────────────────────────────────────────
 
-/** 1) 초기 인사 */
-async function handleGreeting(
+/** 1-A) 최초 인사 (새 사용자) */
+async function handleFirstGreeting(
   systemPrompt: string,
   userName: string,
   honorific: string,
@@ -88,6 +88,37 @@ async function handleGreeting(
   const prompt = `지금 ${userName}님이 대화를 시작하려고 합니다. AI 가족 역할은 '손녀/손자'로 하고, 이름은 '민지'로 해주세요.
 위 [사용자 정보]의 호칭(${honorific})으로 부르면서, [현재 환경 정보]를 반영해 현재 시각대에 맞는 구체적인 선제적 질문을 포함한 첫 인사 한 마디만 짧게 해주세요.
 예: 할아버지/할머니에게 "아침 식사는 하셨나요?", "점심 드셨나요?", "오늘 날씨가 맑은데 산책 어떠세요?" 등. (본인 소개 포함)`;
+
+  const res = await model.generateContent(prompt);
+  const text = res.response.text();
+
+  if (conversationId) {
+    await saveGreetingMessage(conversationId, text);
+  }
+  return NextResponse.json({ text, role: "assistant" });
+}
+
+/** 1-B) 재접속 인사 (기존 사용자가 시간이 지나서 다시 옴) */
+async function handleReturningGreeting(
+  systemPrompt: string,
+  userName: string,
+  honorific: string,
+  conversationId?: string,
+) {
+  const model = getTextModel(systemPrompt);
+  const prompt = `${userName}(${honorific})님이 다시 돌아왔습니다. 손녀 '민지'로서 따뜻하게 반겨주세요.
+
+[지시사항]
+- "다시 와주셨네요" 또는 "보고 싶었어요" 같은 자연스러운 재인사를 해주세요. 처음 만난 것처럼 자기소개를 다시 하지 마세요.
+- [현재 환경 정보]를 반영해 시간대에 맞는 질문을 하세요 (아침→아침 식사, 점심→점심, 저녁→저녁 식사/하루 정리).
+- [인지 선별 안내]에 아직 확인하지 않은 영역이 있으면, 자연스러운 대화 안에 하나만 녹여서 질문하세요.
+  예시:
+  - 시간 지남력: "오늘이 무슨 요일인지 민지가 깜빡했어요~"
+  - 장소 지남력: "지금 집에 계세요?"
+  - 기억력: "지난번에 ○○ 좋아하신다고 하셨는데, 요즘도 드세요?"
+  - 판단력: "오늘 밖에 나가시면 뭘 입으실 거예요?"
+- 인지 질문을 억지로 끼워넣지 말고, 맥락에 맞을 때만 자연스럽게 포함하세요.
+- 전체 답변은 2~3문장으로 짧게 해주세요.`;
 
   const res = await model.generateContent(prompt);
   const text = res.response.text();
@@ -288,7 +319,7 @@ export async function POST(req: Request) {
 
   try {
     const body = (await req.json()) as ChatRequestBody;
-    const { messages, conversationId, isInitialGreeting, audio, context: clientContext } = body;
+    const { messages, conversationId, isInitialGreeting, isReturningGreeting, audio, context: clientContext } = body;
     const userId = session.user.id;
 
     // 공통: 시간 + 날씨 + 시스템 프롬프트 조립
@@ -301,9 +332,12 @@ export async function POST(req: Request) {
       weather: weatherCtx,
     });
 
-    // 1) 초기 인사
+    // 1) 인사
     if (isInitialGreeting) {
-      return handleGreeting(systemPrompt, userName, honorific, conversationId);
+      return handleFirstGreeting(systemPrompt, userName, honorific, conversationId);
+    }
+    if (isReturningGreeting) {
+      return handleReturningGreeting(systemPrompt, userName, honorific, conversationId);
     }
 
     // 공통: RAG 검색 + 히스토리 텍스트

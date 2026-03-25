@@ -13,14 +13,18 @@ export async function GET() {
   const conv = await prisma.conversation.findUnique({
     where: { userId: session.user.id },
     include: {
-      messages: { orderBy: { createdAt: "asc" }, select: { id: true, role: true, content: true } },
+      messages: { orderBy: { createdAt: "asc" }, select: { id: true, role: true, content: true, createdAt: true } },
     },
   });
 
-  if (!conv) return NextResponse.json({ conversation: null, messages: [] });
+  if (!conv) return NextResponse.json({ conversation: null, messages: [], lastMessageAt: null });
+
+  const lastMsg = conv.messages.length > 0 ? conv.messages[conv.messages.length - 1] : null;
+
   return NextResponse.json({
     conversation: { id: conv.id },
     messages: conv.messages.map((m) => ({ id: m.id, role: m.role, content: m.content })),
+    lastMessageAt: lastMsg?.createdAt?.toISOString() ?? null,
   });
 }
 
