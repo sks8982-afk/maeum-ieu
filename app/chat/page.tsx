@@ -125,7 +125,20 @@ export default function ChatPage() {
   const speak = useCallback((text: string) => {
     if (typeof window === "undefined") return;
     if (!("speechSynthesis" in window)) return;
-    const utter = new SpeechSynthesisUtterance(text);
+
+    // TTS가 읽기 좋도록 텍스트 전처리
+    let ttsText = text
+      // "12-3-30" → "12, 3, 30" (숫자-하이픈 패턴을 쉼표 구분으로)
+      .replace(/(\d+)-(\d+)-(\d+)/g, "$1, $2, $3")
+      // "4.8km" → "4.8 킬로미터"
+      .replace(/(\d+(?:\.\d+)?)\s*km\/h/gi, "$1 킬로미터퍼아워")
+      .replace(/(\d+(?:\.\d+)?)\s*km/gi, "$1 킬로미터")
+      // URL이나 이메일 제거 (읽으면 이상함)
+      .replace(/https?:\/\/\S+/g, "링크")
+      // 괄호 안 영문 약어 제거
+      .replace(/\([A-Za-z0-9./%]+\)/g, "");
+
+    const utter = new SpeechSynthesisUtterance(ttsText);
     utter.lang = "ko-KR";
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utter);
