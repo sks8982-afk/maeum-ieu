@@ -14,6 +14,7 @@ import Link from "next/link";
 import { LogoutButton, LogoutIcon } from "../LogoutButton";
 import { VoiceRecorder } from "@/lib/voiceprint/recorder";
 import { extractVoiceprintRobust, warmupVoiceprint, VOICEPRINT_THRESHOLD } from "@/lib/voiceprint/client";
+import { VoiceprintConsentCard, withdrawSensitiveConsent } from "../components/SensitiveConsentCards";
 
 const ENROLL_SECS = 30;  // 한 번에 길게 — 내부에서 여러 창으로 쪼개 표본화(실측: 30초 1회로 본인 87%)
 const TEST_SECS = 5;
@@ -42,6 +43,8 @@ function Inner() {
   const [testLabel, setTestLabel] = useState("본인"); // 이번 테스트가 누구 목소리인지 태그
   const [msg, setMsg] = useState("");
   const [levels, setLevels] = useState<number[]>([]); // 실시간 음량 파형(최근 값)
+  /** 목소리 등록 별도 동의(대상자 본인의 것) — null=확인 중. 동의 전엔 녹음 UI를 보이지 않는다 */
+  const [consent, setConsent] = useState<boolean | null>(null);
   const recRef = useRef<VoiceRecorder | null>(null);
 
   const BARS = 28;
@@ -55,8 +58,9 @@ function Inner() {
   const loadStatus = () => {
     const qs = target ? `?targetUserId=${encodeURIComponent(target)}` : "";
     fetch(`/api/voiceprint${qs}`).then((r) => r.ok ? r.json() : null).then((d) => {
-      if (d) setSampleCount(d.sampleCount ?? 0);
-    }).catch(() => {});
+      if (d) { setSampleCount(d.sampleCount ?? 0); setConsent(d.voiceprintConsent === true); }
+      else setConsent(false);
+    }).catch(() => setConsent(false));
   };
   useEffect(() => { if (status === "authenticated") loadStatus(); }, [status]);
 
@@ -98,6 +102,7 @@ function Inner() {
         body: JSON.stringify({ action: "enroll", embedding, sampleSecs: audio.length / 16000, targetUserId: target }),
       });
       const d = await res.json().catch(() => ({}));
+      if (d?.needVoiceprintConsent) setConsent(false);
       if (!res.ok) throw new Error(d.error || "등록 실패");
       setSampleCount(d.sampleCount ?? sampleCount + 1);
       setMsg(`목소리 등록 완료! (표본 ${d.sampleCount}개) 이제 아래에서 확인 테스트를 해보세요.`);
@@ -116,6 +121,17 @@ function Inner() {
     } finally { setBusy(false); }
   };
 
+  /** 동의 철회 — 서버가 성문(대표·표본)을 함께 지운다(app/api/users/sensitive-consent). 본인 화면에서만 */
+  const doWithdraw = async () => {
+    if (!window.confirm("동의를 철회하면 등록한 목소리 특징값이 바로 지워지고, 상시 감시도 쓸 수 없어요. 철회할까요?")) return;
+    setBusy(true);
+    const err = await withdrawSensitiveConsent("voiceprint");
+    setBusy(false);
+    if (err) { setMsg(err); return; }
+    setSampleCount(0); setResult(null); setHistory([]); setConsent(false);
+    setMsg("동의를 철회하고 등록한 목소리를 지웠어요.");
+  };
+
   const doTest = async () => {
     setBusy(true); setMode("test"); setResult(null);
     try {
@@ -129,6 +145,7 @@ function Inner() {
         body: JSON.stringify({ action: "verify", embedding, targetUserId: target }),
       });
       const d = await res.json().catch(() => ({}));
+      if (d?.needVoiceprintConsent) setConsent(false);
       if (!res.ok) throw new Error(d.error || "확인 실패");
       setResult({ score: d.score, isSelf: d.isSelf });
       setHistory((prev) => [{ score: d.score, label: testLabel }, ...prev].slice(0, 12));
@@ -169,6 +186,17 @@ function Inner() {
 
         {msg && <p className="rounded-xl bg-white px-4 py-3 text-sm shadow-sm dark:bg-zinc-800">{msg}</p>}
 
+        {/* 별도 동의 전에는 녹음 UI를 보이지 않는다 — 본인은 동의 화면, 대리(전문가)는 안내만 */}
+        {consent === false && !target && (
+          <VoiceprintConsentCard onAgreed={() => { setConsent(true); setSampleCount(0); setMsg(""); }} />
+        )}
+        {consent === false && target && (
+          <p className="rounded-2xl bg-amber-50 px-5 py-4 text-[15px] text-amber-900 dark:bg-amber-900/30 dark:text-amber-200">
+            어르신 본인이 먼저 어르신 계정에서 <b>목소리 등록 동의</b>를 하셔야 대신 등록할 수 있어요.
+          </p>
+        )}
+
+        {consent && (<>
         {/* 등록 */}
         <section className="rounded-2xl bg-white p-5 shadow-sm dark:bg-zinc-900">
           <div className="flex items-center justify-between">
@@ -251,8 +279,14 @@ function Inner() {
         </section>
 
         <p className="text-center text-xs text-zinc-400">
-          목소리 원본은 휴대폰을 벗어나지 않아요 — 분석한 특징값만 안전하게 저장됩니다.
+          녹음한 목소리는 휴대폰을 벗어나지 않아요 — 특징값만 암호화해 저장합니다. 확인 테스트의 특징값은 비교에만 쓰고 저장하지 않아요.
         </p>
+        {!target && (
+          <button onClick={doWithdraw} disabled={busy} className="w-full text-center text-xs text-zinc-400 underline hover:text-zinc-600 disabled:opacity-50 dark:hover:text-zinc-300">
+            목소리 등록 동의 철회(등록한 목소리 지우기)
+          </button>
+        )}
+        </>)}
       </main>
     </div>
   );

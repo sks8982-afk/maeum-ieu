@@ -6,9 +6,13 @@
  *     지문 다회 등록처럼 표본이 쌓일수록 대표 성문이 안정화됨. 원음성 미저장(벡터만).
  * POST { action: "verify", embedding, targetUserId? }  → 대표 성문과 코사인 유사도 → { score, isSelf }
  * POST { action: "reset",  targetUserId? }              → 표본·대표 성문 전부 삭제(다시 처음부터)
- * GET  → { enrolled, sampleCount, updatedAt?, sampleSecs? }
+ * GET  → { enrolled, sampleCount, updatedAt?, sampleSecs?, voiceprintConsent }
  *
- * targetUserId(보호자가 환자 대신 등록): pro + active 연결일 때만.
+ * targetUserId(전문가가 환자 대신 등록): pro + active 연결일 때만, 그리고 **환자 본인의 목소리 등록 동의**가 있을 때만.
+ *
+ * 성문은 생체인식정보(민감정보)다 — 2026-10-06부터:
+ *   · 만들기·대조·벡터 조회는 별도 동의(lib/sensitive-consent, kind "voiceprint")가 있어야 한다(제23조①1호)
+ *   · 저장은 암호화(lib/voiceprint/seal — 안전성 확보조치 기준 제7조②7호). 예전엔 평문 JSONB였다.
  */
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
@@ -17,6 +21,8 @@ import { prisma } from "@/lib/prisma";
 import { randomUUID } from "crypto";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { VOICEPRINT_MODEL_ID, VOICEPRINT_THRESHOLD, VOICEPRINT_DIM } from "@/lib/voiceprint/constants";
+import { getActiveSensitiveConsents } from "@/lib/sensitive-consent";
+import { sealEmbedding, openEmbedding } from "@/lib/voiceprint/seal";
 
 const EMBED_DIM = VOICEPRINT_DIM;
 
@@ -55,15 +61,24 @@ export async function GET(req: Request) {
   // 성문 **벡터**(생체정보)는 본인에게만 — 상시 감시가 본인 기기 안에서 화자 게이팅할 때만 쓴다.
   //   연결된 전문가는 등록 여부·표본 수만 보면 된다. 예전엔 targetUserId로 환자 벡터를 그대로 받을 수
   //   있었다(2026-10-06 재검토 — 쓰는 화면은 없지만 최소 수집·최소 제공 원칙)
-  const withEmbedding = new URL(req.url).searchParams.get("withEmbedding") === "1" && uid === session.user.id;
+  //   ⚠ 별도 동의가 없으면 벡터를 내주지 않는다 — 동의 전에 만들어진 성문(예전 등록분)을 쓰지 않는다.
+  const voiceprintConsent = (await getActiveSensitiveConsents(uid)).has("voiceprint");
+  const withEmbedding = new URL(req.url).searchParams.get("withEmbedding") === "1" && uid === session.user.id && voiceprintConsent;
   const cols = withEmbedding ? "updated_at, sample_secs, sample_count, embedding" : "updated_at, sample_secs, sample_count";
   const rows = await prisma.$queryRawUnsafe<{ updated_at: Date; sample_secs: number | null; sample_count: number; embedding?: unknown }[]>(
     `SELECT ${cols} FROM speaker_voiceprint WHERE user_id = $1`, uid,
   );
   const r = rows[0];
-  const out: Record<string, unknown> = { enrolled: !!r, sampleCount: r?.sample_count ?? 0, updatedAt: r?.updated_at ?? null, sampleSecs: r?.sample_secs ?? null, threshold: VOICEPRINT_THRESHOLD };
+  const out: Record<string, unknown> = {
+    enrolled: !!r, sampleCount: r?.sample_count ?? 0, updatedAt: r?.updated_at ?? null, sampleSecs: r?.sample_secs ?? null,
+    threshold: VOICEPRINT_THRESHOLD, voiceprintConsent,
+  };
   // 본인 성문 벡터 반환 — 상시 감시가 기기 안에서 화자 게이팅(비환자 오디오 미전송)하도록. 본인 한정(위 withEmbedding).
-  if (withEmbedding && r?.embedding) out.embedding = r.embedding;
+  if (withEmbedding && r?.embedding) {
+    const vec = openEmbedding(r.embedding);
+    if (vec) out.embedding = vec;
+    else console.error("[voiceprint] 저장된 성문을 읽을 수 없음(복호 실패) — 재등록 필요");
+  }
   return NextResponse.json(out);
 }
 
@@ -97,9 +112,8 @@ export async function POST(req: Request) {
    *   성문을 만들 수 있었다(상시 감시는 이제 어르신 계정만 받으므로 쓸 곳도 없다). pro의 대리 등록도
    *   환자 동의를 보지 않았다.
    *
-   * ⚠ 이것으로 법적 요건이 채워지지는 않는다. 성문은 생체인식정보(민감정보)인데, 현재 동의서와
-   *   개인정보처리방침 어디에도 성문 저장이 고지돼 있지 않다 — 별도 동의 문구가 필요하다(사용자 판단,
-   *   docs/CYCLE_FIXLOG.md OPEN). 여기서는 최소한 "동의 게이트를 통과한 어르신 계정"으로 범위를 좁힌다.
+   * 그 위에 2026-10-06: 성문 **별도 동의**(대상자 본인의 것)가 있어야 한다 — 전문가 대리 등록도 환자의
+   *   동의를 본다. 동의는 본인만 할 수 있다(app/api/users/sensitive-consent).
    */
   if (action === "enroll" || action === "verify") {
     const target = await prisma.user.findUnique({ where: { id: uid }, select: { consentedAt: true, screeningMode: true } });
@@ -109,40 +123,57 @@ export async function POST(req: Request) {
     if (target.screeningMode !== "user") {
       return NextResponse.json({ error: "목소리 등록은 어르신 계정에서만 할 수 있어요.", wrongRole: true }, { status: 403 });
     }
+    if (!(await getActiveSensitiveConsents(uid)).has("voiceprint")) {
+      return NextResponse.json({ error: "목소리 등록 동의가 필요합니다.", needVoiceprintConsent: true }, { status: 403 });
+    }
   }
 
   if (action === "enroll") {
     const sampleSecs = typeof body?.sampleSecs === "number" ? Math.max(0, Math.min(600, body.sampleSecs)) : null;
+    // 암호화부터 — 키가 없으면 아무것도 쓰지 않고 멈춘다(평문 저장 금지, lib/voiceprint/seal)
+    let sealedSample: string;
+    try { sealedSample = sealEmbedding(embedding); }
+    catch (e) {
+      console.error("[voiceprint]", e instanceof Error ? e.message : e);
+      return NextResponse.json({ error: "보안 설정 문제로 목소리를 저장하지 못했어요. 잠시 후 다시 시도해 주세요." }, { status: 500 });
+    }
     // 1) 개별 표본 추가
     await prisma.$executeRawUnsafe(
       `INSERT INTO speaker_voiceprint_sample (id, user_id, embedding, sample_secs) VALUES ($1, $2, $3::jsonb, $4)`,
-      randomUUID(), uid, JSON.stringify(embedding), sampleSecs,
+      randomUUID(), uid, JSON.stringify(sealedSample), sampleSecs,
     );
-    // 2) 전체 표본 평균 → 대표 성문 갱신
+    // 2) 전체 표본 평균 → 대표 성문 갱신 (읽을 수 없는 표본 — 키 교체 등 — 은 빼고 센다)
     const samples = await prisma.$queryRawUnsafe<{ embedding: unknown }[]>(
       `SELECT embedding FROM speaker_voiceprint_sample WHERE user_id = $1`, uid,
     );
+    const vecs = samples.map((s) => openEmbedding(s.embedding)).filter((v): v is number[] => v !== null);
+    if (vecs.length === 0) {
+      return NextResponse.json({ error: "저장된 목소리를 읽을 수 없어요. 등록을 초기화한 뒤 다시 해 주세요." }, { status: 500 });
+    }
     const dim = EMBED_DIM;
     const mean = new Array(dim).fill(0);
-    for (const s of samples) { const e = s.embedding as number[]; for (let i = 0; i < dim; i++) mean[i] += e[i]; }
-    for (let i = 0; i < dim; i++) mean[i] /= samples.length;
+    for (const e of vecs) { for (let i = 0; i < dim; i++) mean[i] += e[i]; }
+    for (let i = 0; i < dim; i++) mean[i] /= vecs.length;
     const centroid = l2norm(mean);
     await prisma.$executeRawUnsafe(
       `INSERT INTO speaker_voiceprint (user_id, embedding, dim, model, sample_secs, sample_count, updated_at)
        VALUES ($1, $2::jsonb, $3, $4, $5, $6, now())
        ON CONFLICT (user_id) DO UPDATE SET embedding = EXCLUDED.embedding, dim = EXCLUDED.dim,
          model = EXCLUDED.model, sample_secs = EXCLUDED.sample_secs, sample_count = EXCLUDED.sample_count, updated_at = now()`,
-      uid, JSON.stringify(centroid), dim, VOICEPRINT_MODEL_ID, sampleSecs, samples.length,
+      uid, JSON.stringify(sealEmbedding(centroid)), dim, VOICEPRINT_MODEL_ID, sampleSecs, vecs.length,
     );
-    return NextResponse.json({ ok: true, enrolled: true, sampleCount: samples.length });
+    return NextResponse.json({ ok: true, enrolled: true, sampleCount: vecs.length });
   }
 
   if (action === "verify") {
+    // 대조용으로 받은 특징값은 비교에만 쓰고 저장하지 않는다(확인 테스트의 '다른 사람' 목소리 포함)
     const rows = await prisma.$queryRawUnsafe<{ embedding: unknown }[]>(
       `SELECT embedding FROM speaker_voiceprint WHERE user_id = $1`, uid,
     );
     if (!rows[0]) return NextResponse.json({ error: "등록된 성문이 없습니다." }, { status: 404 });
-    const score = cosine(embedding, rows[0].embedding as number[]);
+    const rep = openEmbedding(rows[0].embedding);
+    if (!rep) return NextResponse.json({ error: "등록된 목소리를 읽을 수 없어요. 다시 등록해 주세요." }, { status: 500 });
+    const score = cosine(embedding, rep);
     return NextResponse.json({ score, isSelf: score >= VOICEPRINT_THRESHOLD, threshold: VOICEPRINT_THRESHOLD });
   }
 

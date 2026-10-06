@@ -31,11 +31,19 @@ const messageCreate = vi.fn<(a: { data: { emergencyLevel: number | null; content
 let recentL1 = 0;
 /** 동의 조회 결과 — Error면 DB 장애를 흉내낸다 */
 let consentRow: { consentedAt: Date | null } | null | Error = { consentedAt: new Date("2026-01-01") };
+/** 상시 감시 별도 동의 행(sensitive_consent) — Error면 조회 실패. 기본은 처리·제공 둘 다 유효 */
+const BOTH = [{ kind: "observe", version: "1.0" }, { kind: "observe_share", version: "1.0" }];
+let sensitiveRows: { kind: string; version: string }[] | Error = BOTH;
 // L1 집계 조회 인자 — "어느 대화의 L1을 세는지"를 확인한다(2026-10-06 재검토: 인자를 안 보면 엉뚱한 키도 녹색)
 const countArgs: { where?: { conversationId?: string } }[] = [];
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: { findUnique: vi.fn(async () => { if (consentRow instanceof Error) throw consentRow; return consentRow; }) },
+    $queryRawUnsafe: vi.fn(async (sql: string) => {
+      if (!sql.includes("sensitive_consent")) return [];
+      if (sensitiveRows instanceof Error) throw sensitiveRows;
+      return sensitiveRows;
+    }),
     conversation: { findUnique: vi.fn(async () => ({ id: "c-obs" })), create: vi.fn(async () => ({ id: "c-obs" })) },
     message: {
       create: (a: { data: { emergencyLevel: number | null; content: string } }) => messageCreate(a),
@@ -82,6 +90,7 @@ beforeEach(() => {
   pending.length = 0;
   recentL1 = 0;
   consentRow = { consentedAt: new Date("2026-01-01") };
+  sensitiveRows = BOTH;
   sttCalls.length = 0;
   sttConfigs.length = 0;
   session = { user: { id: "u-elder", name: "김어르신", screeningMode: "user" } };
@@ -251,5 +260,74 @@ describe("건강정보 수집 동의 (2026-10-06)", () => {
     expect(r.status).toBe(200);
     expect(r.body.emergencyLevel).toBe(3);
     expect(notifyGuardian).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * 상시 감시 **별도 동의**(2026-10-06) — 음성·건강정보 처리(제23조) + 보호자·의사 제공(제17조), 각각.
+ *   예전엔 건강정보 동의(v1.1)만 봤다. v1.1은 주변 소리 청취·혼잣말 전사·Google 전송을 고지하지 않는다.
+ */
+describe("상시 감시 별도 동의 (2026-10-06)", () => {
+  it.each([
+    ["동의 없음", []],
+    ["처리만 있고 제공 동의 없음", [{ kind: "observe", version: "1.0" }]],
+    ["제공만 있고 처리 동의 없음", [{ kind: "observe_share", version: "1.0" }]],
+    ["예전 문안 버전의 동의", [{ kind: "observe", version: "0.9" }, { kind: "observe_share", version: "0.9" }]],
+  ])("%s → 403 needObserveConsent, 전사(=Google 전송)·저장·알림 없음", async (_label, rows) => {
+    sensitiveRows = rows;
+    const r = await call("숨이 안 쉬어져");
+    expect(r.status).toBe(403);
+    expect(r.body.needObserveConsent).toBe(true);
+    // 🔒 막혀야 할 때 전사가 일어나면 동의 없이 음성이 국외(Google)로 간 것이다
+    expect(sttCalls).toEqual([]);
+    expect(messageCreate).not.toHaveBeenCalled();
+    expect(notifyGuardian).not.toHaveBeenCalled();
+  });
+
+  it("동의 테이블이 아직 없으면(배포 순서 어긋남) 막는다 — 장애로 보고 통과시키지 않는다", async () => {
+    sensitiveRows = new Error(`Raw query failed. Code: \`42P01\`. Message: \`relation "sensitive_consent" does not exist\``);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const r = await call("숨이 안 쉬어져");
+    // 🔒 이걸 "조회 실패"로 보면 아래 비대칭(장애 중 계속)을 타고 동의 없이 감시가 돈다
+    expect(r.status).toBe(403);
+    expect(r.body.needObserveConsent).toBe(true);
+    expect(sttCalls).toEqual([]);
+  });
+
+  it("⚠ DB 전체 장애(두 동의 조회 모두 실패)면 감시를 멈추지 않는다 — 건강정보 동의와 같은 비대칭", async () => {
+    consentRow = new Error("connection refused");
+    sensitiveRows = new Error("connection refused");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const r = await call("숨이 안 쉬어져");
+    expect(r.status).toBe(200);
+    expect(r.body.emergencyLevel).toBe(3);
+    expect(notifyGuardian).toHaveBeenCalledTimes(1);
+  });
+
+  it("건강정보 동의 조회는 되는데 별도 동의 조회만 실패하면 처리하지 않는다(503) — 계속되는 고장일 수 있다", async () => {
+    sensitiveRows = new Error('permission denied for table sensitive_consent');
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const r = await call("숨이 안 쉬어져");
+    // 🔒 이걸 장애로 보고 통과시키면 권한 오류 같은 영구 고장 동안 동의 없이 감시가 계속 돈다
+    expect(r.status).toBe(503);
+    expect(sttCalls).toEqual([]);
+    expect(messageCreate).not.toHaveBeenCalled();
+    // 클라가 감시를 끄는 신호(needObserveConsent)는 아니다 — 일시 오류로 보고 다음 조각을 계속 보낸다
+    expect(r.body.needObserveConsent).toBeUndefined();
+  });
+});
+
+describe("위급 신호가 없는 말은 저장하지 않는다 (2026-10-06 — 동의서·처리방침 고지)", () => {
+  it("일상 혼잣말은 전사 결과만 돌려주고 기록을 남기지 않는다", async () => {
+    const t = "오늘 날씨가 참 좋네 빨래나 널어야겠다";
+    expect(detectEmergency(t).level, "전제: 응급 아님").toBe(0);
+    expect(evaluateSttConfidence(t).pass, "전제: 신뢰도 통과").toBe(true);
+    const r = await call(t);
+    expect(r.status).toBe(200);
+    expect(r.body.emergencyLevel).toBe(0);
+    expect(r.body.text).toBe(t);
+    // 🔒 예전엔 혼잣말 전부를 "[관찰]"로 탈퇴 때까지 쌓았다 — 읽는 곳도 없는 민감정보
+    expect(messageCreate).not.toHaveBeenCalled();
+    expect(notifyGuardian).not.toHaveBeenCalled();
   });
 });

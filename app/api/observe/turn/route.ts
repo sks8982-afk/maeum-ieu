@@ -3,11 +3,16 @@
  *
  * 클라가 온디바이스에서 (1) 발화 단위로 분할, (2) 화자식별로 "등록된 환자 목소리"만 통과시켜
  * 그 조각의 WAV(base64)를 여기로 보낸다. 다른 사람/잡음은 클라에서 폐기 → 서버 미도달(제3자 녹음 회피).
+ *   ⚠ 한계: 판정은 조각(최대 30초) 평균 하나라, 어르신 목소리가 우세한 조각에 섞인 다른 사람 말은 함께 온다.
+ *   대화 구간 폐기(다자 화자 감지)는 미구현 — 동의서에 이 한계를 그대로 고지한다("이야기·통화 중엔 꺼 주세요").
  *
- * 서버: 전사 → 응급 감지(정규식+LLM 백스톱) → L2+면 보호자 알림 → 관찰 로그로 저장.
- * 1차: 응급만 활성. (인지/급성변화 분석은 저장된 전사로 후속 확장 — runCognitiveAnalysis 훅 자리 표시)
+ * 서버: 전사 → 응급 감지(정규식+LLM 백스톱) → L2+면 보호자 알림 → **위급 신호(L1+)만** 관찰 기록으로 저장.
+ * 1차: 응급만 활성. (인지/급성변화 분석으로 넓히려면 목적이 바뀌므로 **새 동의**가 먼저다)
  *
- * 개인정보: 환자 본인 발화만 처리(동의 대상). 원음성은 저장하지 않고 전사 텍스트만 보존.
+ * 개인정보(2026-10-06, 상시 감시 동의서·처리방침과 짝):
+ *   · 상시 감시 **별도 동의**(음성·건강정보 처리 + 보호자·의사 제공, lib/sensitive-consent)가 있어야 처리한다
+ *   · 원음성은 저장하지 않는다(전사에만 쓰고 버린다)
+ *   · 위급 신호가 없는 말은 전사 뒤 저장하지 않는다 — 예전엔 혼잣말 전부를 "[관찰]"로 쌓았다(목적 "응급만"과 어긋남)
  */
 import { NextResponse, after } from "next/server";
 import type { Part } from "@google/genai";
@@ -21,6 +26,7 @@ import { notifyGuardian } from "@/lib/chat/emergency-notify";
 import { lastResortEmergency } from "@/lib/chat/emergency-last-resort";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { toObservationContent } from "@/lib/chat/observation";
+import { OBSERVE_KINDS, getActiveSensitiveConsents } from "@/lib/sensitive-consent";
 
 const MAX_AUDIO_B64 = 3_000_000; // ~2MB WAV (30초 16k mono ≈ 960KB) 상한
 /** 감시 전사 상한 — 대화용(LLM_TIMEOUT_MS.stt)보다 넉넉하게. 클라 요청 상한(app/observe/page.tsx)은 이보다 커야 한다 */
@@ -85,11 +91,31 @@ export async function POST(req: Request) {
    *   막으면 장애 중 응급 감지가 통째로 꺼진다. 이 세션은 이미 홈 화면의 동의 게이트를 지나왔고,
    *   장애 중 감지가 꺼지는 쪽이 동의 확인을 한 번 건너뛰는 쪽보다 위험하다.
    *   DB가 정상이면 미동의는 반드시 막힌다.
+   *
+   * 상시 감시 **별도 동의**(2026-10-06)는 이 비대칭을 **DB 전체 장애일 때만** 탄다:
+   *   · 동의 테이블이 아직 없음(배포가 운영 스크립트보다 먼저) → 장애가 아니라 "아무도 동의 안 함" —
+   *     getActiveSensitiveConsents가 빈 집합을 돌려주므로 아래에서 막힌다.
+   *   · 건강정보 동의 조회는 됐는데 별도 동의 조회만 실패 → DB는 살아 있다. 권한 오류처럼 **계속되는**
+   *     고장일 수 있어(운영 스크립트를 다른 DB 계정으로 돌린 경우 등), 계속 통과시키면 동의 없이 감시가
+   *     영구히 돈다. 이 조각은 처리하지 않고 503 — 클라는 감시를 끄지 않고 다음 조각으로 넘어간다.
+   *   · 둘 다 실패 → DB 장애. 위와 같은 이유로 계속한다(응급 감지 우선).
    */
-  const consent = await prisma.user.findUnique({ where: { id: userId }, select: { consentedAt: true } })
-    .catch((e) => { console.error("[observe-turn] 동의 조회 실패 — 감시는 계속:", e instanceof Error ? e.message : e); return undefined; });
+  const fail = (what: string) => (e: unknown) => {
+    console.error(`[observe-turn] ${what} 조회 실패 — 감시는 계속:`, e instanceof Error ? e.message : e);
+    return undefined;
+  };
+  const [consent, sensitive] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId }, select: { consentedAt: true } }).catch(fail("건강정보 동의")),
+    getActiveSensitiveConsents(userId).catch(fail("상시 감시 동의")),
+  ]);
   if (consent !== undefined && !consent?.consentedAt) {
     return NextResponse.json({ error: "건강정보 수집 동의가 필요합니다.", needConsent: true }, { status: 403 });
+  }
+  if (sensitive === undefined && consent !== undefined) {
+    return NextResponse.json({ error: "잠시 후 다시 시도해 주세요." }, { status: 503 });
+  }
+  if (sensitive !== undefined && !OBSERVE_KINDS.every((k) => sensitive.has(k))) {
+    return NextResponse.json({ error: "상시 감시 이용 동의가 필요합니다.", needObserveConsent: true }, { status: 403 });
   }
 
   // 전사는 try 밖에서 받아 catch가 쓸 수 있게 한다 — 안쪽에서만 알면 DB 실패 시 발화를 잃는다.
@@ -120,6 +146,13 @@ export async function POST(req: Request) {
     if (!conf.pass) {
       console.log("[observe-turn] STT 저신뢰이나 응급 동반 — 게이트 우회:", conf.reason, "L" + emergency.level);
     }
+
+    /**
+     * 위급 신호가 없는 말은 **저장하지 않는다**(2026-10-06). 동의서·처리방침이 이렇게 고지한다.
+     *   예전엔 혼잣말 전부를 "[관찰]"로 쌓았는데, 그걸 읽는 곳이 없었다(대화·요약·분석 경로는 전부 거른다).
+     *   목적("응급만")에 필요 없는 민감정보를 탈퇴 때까지 쌓은 셈이다. L1은 24시간 누적 승격에 쓰이므로 저장한다.
+     */
+    if (emergency.level === 0) return NextResponse.json({ ok: true, text, emergencyLevel: 0 });
 
     // 관찰 로그 저장 — 감시 전용이라 AI 응답 없음. user 메시지 1건만 직접 생성(빈 assistant 미생성).
     //   "[관찰]" 접두로 일반 대화와 구분. 응급 dedup·알림마킹(notifyGuardian)이 Message 행에 의존하므로 여기 저장.

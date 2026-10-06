@@ -13,6 +13,11 @@ import crypto from "node:crypto";
 
 const PREFIX = "enc:v1:";
 
+/** 이 값이 암호문 형식인가 — 평문 통과(키 없음)·복호 실패(원문 반환)를 호출부가 가려낼 때 쓴다 */
+export function isEncryptedPII(value: string): boolean {
+  return value.startsWith(PREFIX);
+}
+
 let warnedNoKey = false;
 function getKey(): Buffer | null {
   const raw = process.env.ENCRYPTION_KEY;

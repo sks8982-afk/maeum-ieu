@@ -72,7 +72,7 @@ const CHECKS: Check[] = [
   // ── 위급 알림(현장 테스트 핵심) ──
   { label: "FCM_SERVICE_ACCOUNT(_B64)", sev: "critical", feature: "보호자 앱 푸시", breaks: "앱 위급 알림이 조용히 skip됨", names: ["FCM_SERVICE_ACCOUNT_B64", "FCM_SERVICE_ACCOUNT"],
     validate: v => (v.trim().startsWith("{") ? jsonFields(v, ["project_id", "private_key", "client_email"]) : b64Json(v, ["project_id", "private_key", "client_email"])) },
-  { label: "ENCRYPTION_KEY", sev: "critical", feature: "연락처 PII 암/복호화", breaks: "보호자 이메일/전화 복호화 불가 → 이메일 알림 실패, PII 평문 저장",
+  { label: "ENCRYPTION_KEY", sev: "critical", feature: "연락처 PII·목소리 특징값(성문) 암/복호화", breaks: "보호자 이메일/전화 복호화 불가 → 이메일 알림 실패, PII 평문 저장. 목소리 등록은 저장 거부(평문 금지)·기존 성문 대조 불가",
     names: ["ENCRYPTION_KEY"], validate: v => /^[0-9a-fA-F]{64}$/.test(v) ? null : (v.length >= 16 ? "hex64 아님 → 패스프레이즈로 SHA-256 파생됨(정상이나 ⚠️바뀌면 기존 데이터 복호화 불가)" : "너무 짧음") },
   { label: "GMAIL_USER + GMAIL_APP_PASSWORD", sev: "important", feature: "이메일 위급 알림", breaks: "이메일 채널 미동작(앱푸시/webhook은 별개)", names: ["GMAIL_USER"],
     validate: v => { const pw = process.env.GMAIL_APP_PASSWORD; if (!pw) return "GMAIL_APP_PASSWORD 없음"; if (!/@/.test(v)) return "GMAIL_USER 이메일 형식 아님"; return null; } },

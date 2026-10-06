@@ -4,7 +4,8 @@
  * 상시 감시 모드 (/observe) — 관찰자 모드 본체.
  * AI와 대화하지 않고, 등록된 환자 목소리만 상시 청취·전사·분석해 특이점(1차: 응급) 시 보호자에게 알림.
  * 화자 게이팅은 기기 안에서 수행 — 환자 목소리 조각만 서버로 전송, 다른 사람/잡음은 기기에서 폐기(제3자 녹음 회피).
- * ⚠ 반드시 사전 동의(환자·동거인) 후 사용. 화면에 상시 청취 중임을 명시.
+ * 켜기 전에 상시 감시 **별도 동의**(음성·건강정보 처리 + 보호자·의사 제공, 각각 체크)를 받는다 — 2026-10-06.
+ *   예전엔 "⚠ 사용 전 환자·가족의 동의가 필요합니다" 문구만 있고 받거나 기록하는 수단이 없었다.
  */
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -14,6 +15,7 @@ import { LogoutButton, LogoutIcon } from "../LogoutButton";
 import { VoiceMonitor } from "@/lib/voiceprint/monitor";
 import { extractVoiceprintRobust, cosineSim, float32ToWavBase64, warmupVoiceprint } from "@/lib/voiceprint/client";
 import { SegmentQueue } from "@/lib/voiceprint/segment-queue";
+import { ObserveConsentCard, withdrawSensitiveConsent } from "../components/SensitiveConsentCards";
 
 interface LogItem { at: string; kind: "patient" | "other" | "emergency"; text: string; score: number; level?: number }
 
@@ -22,6 +24,8 @@ export default function ObservePage() {
   const router = useRouter();
 
   const [enrolled, setEnrolled] = useState<boolean | null>(null);
+  /** 상시 감시 별도 동의 — null=확인 중 */
+  const [observeConsent, setObserveConsent] = useState<boolean | null>(null);
   const [running, setRunning] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [level, setLevel] = useState(0);
@@ -58,6 +62,9 @@ export default function ObservePage() {
         setEnrolled(true);
       } else setEnrolled(false);
     }).catch(() => setEnrolled(false));
+    fetch("/api/users/sensitive-consent").then((r) => r.ok ? r.json() : null)
+      .then((d) => setObserveConsent(d?.observe === true))
+      .catch(() => setObserveConsent(false));
   }, [status]);
 
   const pushLog = (item: LogItem) => setLog((prev) => [item, ...prev].slice(0, 50));
@@ -89,8 +96,13 @@ export default function ObservePage() {
        * 감시를 계속할 수 없는 응답 — 예전엔 이게 전부 "(잘 안 들림)"으로 표시됐다. 동의가 필요하거나
        *   보호자 계정으로 켠 경우, 화면은 감시 중인 것처럼 보이는데 실제로는 아무것도 처리되지 않았다.
        */
-      if (res.status === 403 && (d?.needConsent || d?.wrongRole)) {
+      if (res.status === 403 && (d?.needConsent || d?.wrongRole || d?.needObserveConsent)) {
         stop();
+        if (d.needObserveConsent) {
+          setObserveConsent(false);
+          setError("상시 감시 이용 동의가 필요해요. 아래 내용을 확인하고 동의해 주세요.");
+          return false;
+        }
         setError(d.needConsent
           ? "건강정보 수집 동의가 필요해요. 동의 화면에서 동의한 뒤 다시 켜 주세요."
           : (d.error || "이 계정에서는 상시 감시를 쓸 수 없어요."));
@@ -127,6 +139,16 @@ export default function ObservePage() {
   };
   const stop = () => { monRef.current?.stop(); monRef.current = null; queueRef.current?.stop(); queueRef.current = null; setRunning(false); setSpeaking(false); setLevel(0); };
 
+  /** 동의 철회 — 감시를 끄고, 서버가 상시 감시 기록을 함께 지운다(app/api/users/sensitive-consent) */
+  const withdraw = async () => {
+    if (!window.confirm("동의를 철회하면 상시 감시가 꺼지고, 상시 감시로 보관한 기록이 바로 지워져요. 철회할까요?")) return;
+    stop();
+    const err = await withdrawSensitiveConsent("observe");
+    if (err) { setError(err); return; }
+    setLog([]); setCounts({ patient: 0, other: 0 }); setEmergency(null); setError("");
+    setObserveConsent(false);
+  };
+
   return (
     <div className="min-h-screen bg-[#0e1b1e] text-zinc-100">
       <header className="flex items-center justify-between gap-2 border-b border-zinc-800 bg-zinc-900 px-4 py-3">
@@ -151,7 +173,11 @@ export default function ObservePage() {
           </div>
         )}
 
-        {enrolled && (
+        {enrolled && observeConsent === false && (
+          <ObserveConsentCard onAgreed={() => { setObserveConsent(true); setError(""); }} />
+        )}
+
+        {enrolled && observeConsent && (
           <>
             {/* 상태 카드 */}
             <div className="rounded-2xl bg-zinc-800 p-6 text-center">
@@ -171,10 +197,16 @@ export default function ObservePage() {
               <button onClick={stop} className="w-full rounded-full bg-zinc-600 px-6 py-4 text-lg font-bold text-white">■ 감시 끄기</button>
             )}
 
-            <p className="text-center text-xs text-zinc-500">
-              등록된 환자 목소리만 분석해요. 다른 사람 말소리·잡음은 휴대폰에서 바로 버려지고 서버로 가지 않아요.<br />
-              ⚠ 사용 전 환자·가족의 동의가 필요합니다.
+            {/* ⚠ 사실대로 — 판정은 조각 단위라 섞인 말은 함께 갈 수 있다(app/api/observe/turn 헤더). 예전 문구
+                "다른 사람 말소리는 서버로 가지 않아요"는 섞인 조각에 대해 사실이 아니었다(2026-10-06 조사) */}
+            <p className="text-center text-xs leading-relaxed text-zinc-400">
+              어르신 목소리로 판단된 말소리만 보내요. 다른 사람·TV·잡음으로 판단된 소리는 휴대폰에서 바로 버려요.<br />
+              다만 섞이면 함께 갈 수 있으니, <b className="text-zinc-300">다른 분과 이야기하시거나 전화하실 때는 꺼 주세요.</b><br />
+              위급 신호가 없는 말은 저장하지 않아요.
             </p>
+            <button onClick={withdraw} className="w-full text-center text-xs text-zinc-500 underline hover:text-zinc-300">
+              상시 감시 동의 철회(보관한 기록 지우기)
+            </button>
 
             {/* 관찰 로그 */}
             {log.length > 0 && (

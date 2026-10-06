@@ -40,6 +40,7 @@ export default function AccountDeletionPage() {
             <li>대화 기록 및 대화 기반 인지·정서 분석 결과</li>
             <li>복약 일정·복용 기록</li>
             <li>보호자 연락처 등 연결 정보</li>
+            <li>목소리 등록 정보(목소리 특징값·성문)와 상시 감시 기록</li>
           </ul>
           <p className="mt-2 leading-relaxed">
             요청이 처리되면 위 데이터는 모두 <b>영구 삭제</b>되며 복구할 수 없습니다. 원본 음성은 애초에 저장하지

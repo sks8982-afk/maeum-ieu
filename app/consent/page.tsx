@@ -63,6 +63,12 @@ export default function ConsentPage() {
             <p className="font-semibold text-zinc-800 dark:text-zinc-100">⑥ 동의 철회</p>
             <p>언제든 마이페이지 또는 문의를 통해 동의를 철회할 수 있습니다.</p>
           </div>
+          {/* 2026-10-06: 성문(생체인식정보)·상시 감시는 이 동의 범위 밖 — 선택 기능이라 따로 받는다(제22조⑤·제23조) */}
+          {!isGeneral && (
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              ※ 목소리 등록(목소리 특징값)과 상시 감시는 이 동의에 포함되지 않으며, 그 기능을 켤 때 따로 동의를 받습니다(선택).
+            </p>
+          )}
         </div>
 
         <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
