@@ -164,3 +164,29 @@ describe("conversationId 없이 보내도 일일 한도를 센다 (2026-10-06 �
     expect(String(r.body.text)).toMatch(/한국 시각으로/);
   });
 });
+
+describe("과거 해소 자살 생각 — 말만 부드럽게, 기록·알림은 그대로 (B9, 2026-10-06 사용자 결정)", () => {
+  const PAST = "영감 먼저 보내고 한동안은 예전엔 죽고 싶었는데, 지금은 이렇게 친구들이 있어서 괜찮아.";
+
+  it("전제: 감지기는 과거 보존 규칙으로 L2, 모더레이션은 자해로 잡는다", async () => {
+    const { detectInappropriate } = await import("@/lib/chat/moderation");
+    expect(detectEmergency(PAST).level).toBe(2);
+    expect(detectInappropriate(PAST).category).toBe("self_harm");
+  });
+
+  it("응답은 공감·후속 확인·상담 번호, L2 마킹 저장 + 보호자 알림은 유지", async () => {
+    const r = await say(PAST);
+    expect(r.status).toBe(200);
+    // 🔒 2026-10-06 이전: "…자살예방상담전화 109번이나 … 바로 전화하실 수 있어요" 위기 안내
+    expect(String(r.body.text)).toMatch(/다시 그런 마음이 드시면/);
+    expect(String(r.body.text)).not.toMatch(/바로 전화/);
+    expect(saveMessages.mock.calls.some(([p]) => p.emergencyLevel === 2)).toBe(true);
+    expect(notifyGuardian).toHaveBeenCalled();
+    expect(llmCalls).toEqual([]);
+  });
+
+  it("현재형 자살 표현은 기존 위기 안내 그대로", async () => {
+    const r = await say("요즘 자꾸 죽고 싶어");
+    expect(String(r.body.text)).not.toMatch(/다시 그런 마음이 드시면/);
+  });
+});

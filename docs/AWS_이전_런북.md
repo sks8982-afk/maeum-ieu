@@ -112,7 +112,10 @@ npm run check:env:deploy    # 실제 런타임 환경에서 실행 — 빌드 �
 - **`DATABASE_SSL_NO_VERIFY`는 옮기지 말 것** — Vercel env에 남아 있으면 삭제.
   `lib/rds-ca.ts`가 들어온 뒤로 불필요하며, 두면 건강 DB의 TLS 검증이 꺼진다.
 - `NEXT_PUBLIC_SHOW_LIVE_BETA`는 **빌드 인자**다(`--build-arg`). 런타임 env로는 안 바뀐다.
-- `OPS_ALERT_EMAIL` — 모든 보호자 채널이 실패했을 때의 마지막 통보선. 지금 미설정이다.
+- **`GMAIL_USER` + `GMAIL_APP_PASSWORD`** — 보호자 응급 **이메일**과 운영자 경보를 보내는 Gmail. ⚠ 2026-10-06 확인:
+  **현재 Vercel에 이 둘이 없다**(로컬 `.env`에만 있다) → 배포 환경에선 이메일 채널이 꺼져 있다(푸시는 FCM으로 동작).
+  AWS로 옮길 때 반드시 넣을 것. 앱 비밀번호가 만료됐으면 Google 계정에서 재발급.
+- `OPS_ALERT_EMAIL` — 운영자 경보 받는 주소. **없으면 `GMAIL_USER` 자신에게 간다**(2026-10-06부터). 따로 받을 주소가 있을 때만 설정.
 - `TRUSTED_PROXY_HOPS` — ALB만이면 생략(기본 1). CloudFront+ALB면 `2`.
 - `DB_POOL_MAX` — (RDS max_connections − 여유 10) ÷ 최대 태스크 수.
 
@@ -176,7 +179,7 @@ Vercel에 고정 IP가 없어 못 닫고 있었고, AWS로 들어가면 닫을 �
 ## 5. 이전 후 (D+1 ~ D+7)
 
 - [ ] `pilot-daily-check` 새 실행 위치에서 정상 작동 확인 — **응급 미발송 워치독이 살아 있는가**
-- [ ] 운영자 경보(`OPS_ALERT_EMAIL`) 테스트 발송 1회
+- [ ] 운영자 경보 테스트 발송 1회(`OPS_ALERT_EMAIL` 없으면 `GMAIL_USER` 받은편지함에 와야 한다)
 - [ ] CloudWatch에 `[emergency-notify] ... NOT sent` 패턴 알람 등록
       (지금은 console 로그로만 남아 Vercel 대시보드에서 보던 것이다)
 - [ ] Play Console의 `vercel.app` URL 3곳 교체(개인정보처리방침·RTDN·출시 가이드 문서)

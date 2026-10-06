@@ -95,8 +95,8 @@ const CHECKS: Check[] = [
   { label: "BILLING_PRO_PRODUCT_IDS", sev: "optional", feature: "유료 상품 식별", breaks: "비어 있으면 모든 구독 상품을 유료로 인정(가격 미확정 단계에선 정상)",
     names: ["BILLING_PRO_PRODUCT_IDS"] },
   // ── 운영 통보·관리 (2026-10-02 추가 — 둘 다 "없으면 조용히 꺼지는" 유형) ──
-  { label: "OPS_ALERT_EMAIL", sev: "important", feature: "운영자 경보(모든 보호자 채널 실패 시)",
-    breaks: "보호자에게 한 건도 못 보낸 응급을 아무도 모른다 — 하루 한 번 점검(pilot-daily-check)은 Message 행을 전제로 해서 DB 장애 구간을 구조적으로 못 본다",
+  { label: "OPS_ALERT_EMAIL", sev: "optional", feature: "운영자 경보 받는 주소(모든 보호자 채널 실패 시)",
+    breaks: "없으면 보내는 Gmail(GMAIL_USER) 자신에게 간다(2026-10-06). GMAIL_USER까지 없으면 보호자에게 한 건도 못 보낸 응급을 아무도 모른다",
     names: ["OPS_ALERT_EMAIL"], validate: v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? null : "이메일 형식 아님" },
   { label: "ADMIN_EMAILS", sev: "important", feature: "관리자 콘솔(/admin)",
     breaks: "관리자로 인정되는 계정이 없어 운영 통계·회원 현황을 아무도 못 본다",

@@ -83,8 +83,27 @@ describe("규모를 알린다 — 억제 건수", () => {
 });
 
 describe("설정·실패에 강건하다", () => {
-  it("OPS_ALERT_EMAIL 미설정이면 조용히 skip (기능을 막지 않는다)", async () => {
+  /**
+   * 2026-10-06 사용자: "따로 없긴 한데, 그 Gmail로 보내게 되어 있을 텐데" — 운영 경보 전용 주소를 따로 두지 않았다.
+   *   예전엔 OPS_ALERT_EMAIL이 없으면 **아무에게도** 안 보냈다(모든 보호자 채널이 실패한 응급을 아무도 모름).
+   *   이제는 보내는 Gmail 계정(GMAIL_USER) 자신의 받은편지함으로 보낸다.
+   */
+  it("OPS_ALERT_EMAIL 미설정이면 보내는 Gmail(GMAIL_USER) 자신에게 보낸다", async () => {
     delete process.env.OPS_ALERT_EMAIL;
+    const send = await load();
+    expect(await send("제목", ["본문"])).toBe(true);
+    expect((sendMail.mock.calls[0]?.[0] as { to?: string })?.to).toBe("ops@example.com");
+  });
+
+  it("OPS_ALERT_EMAIL이 있으면 그 주소가 우선", async () => {
+    const send = await load();
+    await send("제목", ["본문"]);
+    expect((sendMail.mock.calls[0]?.[0] as { to?: string })?.to).toBe("admin@example.com");
+  });
+
+  it("Gmail 설정 자체가 없으면 조용히 skip (기능을 막지 않는다)", async () => {
+    delete process.env.OPS_ALERT_EMAIL;
+    delete process.env.GMAIL_USER;
     const send = await load();
     expect(await send("제목", ["본문"])).toBe(false);
     expect(sendMail).not.toHaveBeenCalled();

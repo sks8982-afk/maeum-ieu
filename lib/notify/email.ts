@@ -120,7 +120,10 @@ const OPS_ALERT_WINDOW_MS = 60 * 60 * 1000;   // 1시간
 const opsAlertSent = new Map<string, { at: number; suppressed: number }>();
 
 export async function sendOpsAlert(subject: string, lines: string[]): Promise<boolean> {
-  const to = process.env.OPS_ALERT_EMAIL?.trim();
+  // 받는 곳: OPS_ALERT_EMAIL → 없으면 **보내는 Gmail 계정 자신**(GMAIL_USER)의 받은편지함.
+  //   2026-10-06: 운영 경보 전용 주소를 따로 두지 않는 운영이라, 예전처럼 "없으면 아무에게도 안 보냄"이면
+  //   모든 보호자 채널이 실패한 응급을 아무도 모른다(사용자: "그 Gmail로 보내게 되어 있을 텐데").
+  const to = (process.env.OPS_ALERT_EMAIL?.trim() || process.env.GMAIL_USER?.trim());
   const t = getTransporter();
   if (!t || !to || !EMAIL_RE.test(to)) return false;
 

@@ -97,6 +97,38 @@ function isNegatedSelfHarm(text: string, m: RegExpMatchArray | null): boolean {
 }
 
 /**
+ * 과거의 자살 생각을 "지금은 괜찮다"며 말하는가 — B9(2026-10-06 사용자 결정).
+ *
+ * 직접 운전: "예전엔 죽고 싶었는데, 지금은 친구들이 있어서 괜찮아" → "지금 바로 109에 전화" 위기 안내 →
+ *   어르신 "아이고 아니야, 걱정 마". 해소된 과거를 털어놓았는데 위기 취급하면 다음엔 말하지 않게 된다.
+ *   과거 자살 생각은 여전히 위험 요인이라 **기록(L2)·보호자 알림은 그대로** 두고, 말만 공감·후속 확인·상담 번호로 바꾼다.
+ * 판정(전부 만족할 때만 — 하나라도 빠지면 기존 위기 안내, 애매하면 안전한 쪽):
+ *   ① 모든 자해 표현이 과거형("죽고 싶었…") ② 그 앞에 과거 표지 ③ 그 뒤에 지금의 해소 진술 ④ 지속·재발 표지 없음
+ */
+const PAST_MARKER_SH = /예전|옛날|한동안|그때|그\s*당시|젊었을|젊을\s*때|한창\s*때|작년|몇\s*년\s*전|오래\s*전/;
+const NOW_RESOLVED_SH = /(?:지금은|이제는|이젠|요즘은|요새는)[^.!?]{0,20}?(?:괜찮|나아졌|나아|편해졌|편안|살\s*만|좋아졌|견딜\s*만)/;
+const STILL_SH = /지금도|아직도|여전히|요즘도|요새도|자꾸|계속|또\s*(?:그런|그래|죽)|다시\s*(?:그런|죽)/;
+export function isPastResolvedSelfHarm(text: string): boolean {
+  const t = (text || "").trim();
+  if (!t || STILL_SH.test(t)) return false;
+  const matches = SELF_HARM.flatMap((p) => [...t.matchAll(new RegExp(p.source, "g"))]);
+  if (matches.length === 0) return false;
+  for (const m of matches) {
+    const idx = m.index ?? 0;
+    // 과거형이어야 한다 — 하나라도 현재형("죽고 싶어")이면 지금의 위기다
+    if (!/^(?:었|였)/.test(t.slice(idx + m[0].length, idx + m[0].length + 2))) return false;
+    if (!PAST_MARKER_SH.test(t.slice(0, idx))) return false;
+  }
+  const end = Math.max(...matches.map((m) => (m.index ?? 0) + m[0].length));
+  return NOW_RESOLVED_SH.test(t.slice(end));
+}
+
+/** 과거 해소 자살 생각에 대한 응답 — 공감 + 후속 확인(다시 그런 마음이 들면 말해 달라) + 상담 번호 한 줄 */
+export function buildPastSelfHarmReply(honorific: string, companionName: string): string {
+  return `${honorific}, 그때 정말 많이 힘드셨겠어요. 지금은 괜찮으시다니 ${companionName}도 마음이 놓여요. 혹시 다시 그런 마음이 드시면 혼자 견디지 마시고 꼭 ${companionName}한테나 가족분께 말씀해 주세요. 힘드실 땐 자살예방상담전화 109도 24시간 열려 있어요.`;
+}
+
+/**
  * 의료 문맥 가드 — 신체 부위 언급이 진료·검사·통증 맥락이면 성적 표현이 아니다.
  *   "가슴 사진 보여줬어"(흉부 X-ray)가 sexual로 차단되던 결함(2026-10-01 확증).
  *   이 사용자층에서 흉부 촬영·심장 검사·유방 검진은 일상 화제이므로 차단 피해가 크다.

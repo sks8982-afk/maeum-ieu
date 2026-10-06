@@ -27,7 +27,7 @@ import { runCognitiveAnalysis } from "@/lib/chat/cognitive-run";
 import { randomUUID } from "crypto";
 import { buildExamPlan, renderDomainBattery, scoreDomainAnswer, isNonResponse, renderDomainReask, itemsForDomain } from "@/lib/screening/exam-runner";
 import { classifyProvisional, assessCoverage } from "@/lib/screening/exam-eval";
-import { detectInappropriate, buildModerationReply } from "@/lib/chat/moderation";
+import { detectInappropriate, buildModerationReply, isPastResolvedSelfHarm, buildPastSelfHarmReply } from "@/lib/chat/moderation";
 import { detectEmergency, buildEmergencyL3Reply, type EmergencyResult } from "@/lib/chat/emergency";
 import { detectEmergencyLLM } from "@/lib/chat/emergency-llm";
 import { evaluateEmergency, detectWithBackstop } from "@/lib/chat/emergency-evaluate";
@@ -968,7 +968,11 @@ async function handleInappropriateMessage(params: {
     occurrence = prev + 1;
   }
 
-  const reply = buildModerationReply(moderation.category, occurrence, honorific, companionName);
+  // 과거의 자살 생각을 "지금은 괜찮다"며 말한 경우 — 위기 즉답 대신 공감·후속 확인·상담 번호(B9, 2026-10-06 사용자 결정).
+  //   기록(L2 마킹)과 보호자 알림은 아래에서 그대로 한다 — 과거 자살 생각도 가족이 알아야 할 위험 신호다.
+  const reply = moderation.category === "self_harm" && isPastResolvedSelfHarm(userContent)
+    ? buildPastSelfHarmReply(honorific, companionName)
+    : buildModerationReply(moderation.category, occurrence, honorific, companionName);
   // 저장본은 표시 안 보이는 메타 시그니처를 끝에 붙여 향후 카운트에 사용
   const stored = `${reply}\n<!-- __mod:${moderation.category}__ -->`;
 
