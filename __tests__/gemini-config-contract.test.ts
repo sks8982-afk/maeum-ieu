@@ -11,6 +11,10 @@
  * 같은 구문 트리로 헬퍼 호출부가 적은 **새 모델용 thinkingLevel 리터럴**도 고정한다(텍스트 경로 low · Live null) —
  *   단위 테스트의 호출부 표는 사본이라, 실제 호출부가 바뀌어도 녹색이었다.
  * 그리고 오늘 세대에 싣는 예산의 여유 불변식: maxOutputTokens ≥ thinkingBudget + 128(라우팅된 호출부 전부).
+ *   상한·예산을 정할 수 있는 꼴 중 숫자 리터럴로 확인되지 않는 것(축약형·계산된 키·다른 펼침·숫자 아닌 값)은
+ *   원문을 드러내며 실패한다 — '상한 없음'은 상한이 어떤 꼴로도 없고 헬퍼 결과 말고는 펼침도 없을 때뿐이다.
+ *   config를 다시 펼치는 래퍼(getTextModel 등)의 덮어쓰기는 소스로 못 따라간다 — gemini-config-callsites가
+ *   SDK에 실제로 간 요청에서 같은 불변식을 본다.
  */
 import { describe, it, expect } from "vitest";
 import ts from "typescript";
@@ -23,7 +27,11 @@ const HELPER_NAME = "geminiTuning";
 /** Gemini에 직접 실으면 안 되는 키 — thinkingConfig 통째로도 헬퍼 밖에선 금지 */
 const FORBIDDEN = new Set(["temperature", "topP", "topK", "thinkingBudget", "thinkingLevel", "thinkingConfig"]);
 
-/** 헬퍼로 라우팅된 호출부 — 하나라도 빠지면 그 파일이 헬퍼를 우회했다는 뜻 */
+/**
+ * 헬퍼로 라우팅된 호출부 — 하나라도 빠지면 그 파일이 헬퍼를 우회했다는 뜻.
+ *   역방향도 본다: app/·lib/에서 헬퍼 호출이 있는 파일·호출 수가 이 표와 정확히 같아야 한다(아래 인벤토리) —
+ *   표 밖의 새 호출부는 thinkingLevel·thinking 여유 검사를 받지 않고 지나가기 때문이다.
+ */
 const ROUTED_FILES: Record<string, number> = {
   "app/api/chat/route.ts": 1,
   "app/api/observe/turn/route.ts": 1,
@@ -158,25 +166,68 @@ function configsOf(call: ts.CallExpression): ts.ObjectLiteralExpression[] {
 }
 
 /**
- * 헬퍼 호출마다 (오늘 세대에 싣는 thinkingBudget, 그 결과가 펼쳐진 config의 maxOutputTokens) 쌍.
- *   maxOutputTokens가 없으면 Infinity(모델 기본 상한 — Live). 숫자로 읽을 수 없는 값은 원문 문자열로 남긴다.
+ * 객체 리터럴에서 key를 정할 수 있는 원소를 **전부** 본다 — `key: 값` 꼴만 찾으면, 상한을 축약형이나 다른 객체
+ *   펼침으로 64로 내려도 '없음 = 상한 없음(Infinity)'으로 읽혀 녹색이었다.
+ *   value: 그 키의 값 식(`key: 값`의 값 · 축약형 `key`는 그 식별자, 마지막 것이 이긴다)
+ *   unverifiable: 정적으로 따질 수 없는 원소의 원문 — 계산된 키(무엇이든)·그 키의 메서드/접근자·allowSpread가 허용하지 않은 펼침
  */
+function readKey(obj: ts.ObjectLiteralExpression, key: string, sf: ts.SourceFile,
+  allowSpread: (e: ts.Expression) => boolean): { value?: ts.Expression; unverifiable: string[] } {
+  let value: ts.Expression | undefined;
+  const unverifiable: string[] = [];
+  for (const p of obj.properties) {
+    if (ts.isSpreadAssignment(p)) {
+      if (!allowSpread(p.expression)) unverifiable.push(p.getText(sf));
+    } else if (ts.isComputedPropertyName(p.name)) {
+      unverifiable.push(p.getText(sf));
+    } else if (keyName(p.name) === key) {
+      if (ts.isPropertyAssignment(p)) value = p.initializer;
+      else if (ts.isShorthandPropertyAssignment(p)) value = p.name;
+      else unverifiable.push(p.getText(sf));
+    }
+  }
+  return { value, unverifiable };
+}
+
+/** config에 허용되는 유일한 펼침 — 그 헬퍼 호출 자체(`...geminiTuning(…)`)나 그 결과를 담은 변수(`const t = geminiTuning(…)` 뒤 `...t`) */
+function isOwnTuning(call: ts.CallExpression): (e: ts.Expression) => boolean {
+  const v = call.parent;
+  const name = ts.isVariableDeclaration(v) && ts.isIdentifier(v.name) ? v.name.text : undefined;
+  return (e) => e === call || (name !== undefined && ts.isIdentifier(e) && e.text === name);
+}
+
+/** 헬퍼 두 번째 인자의 thinkingBudget — 인자 안의 펼침·계산된 키도 예산을 바꿀 수 있어 원문으로 남긴다. env 예산 파일은 기본값 */
+function budgetOf(call: ts.CallExpression, fileName: string, sf: ts.SourceFile): number | string {
+  const arg = call.arguments[1];
+  if (!arg || !ts.isObjectLiteralExpression(arg)) return `<객체 리터럴 아님: ${(arg ?? call).getText(sf)}>`;
+  const b = readKey(arg, "thinkingBudget", sf, () => false);
+  if (b.unverifiable.length > 0) return b.unverifiable.join(", ");
+  if (b.value === undefined) return "<thinkingBudget 없음>";
+  return ts.isNumericLiteral(b.value) ? Number(b.value.text) : ENV_BUDGET_DEFAULT[fileName] ?? b.value.getText(sf);
+}
+
+/**
+ * 헬퍼 결과가 펼쳐진 config의 maxOutputTokens — 숫자 리터럴이면 그 수, 그 밖의 꼴은 원문(위반으로 드러난다).
+ *   Infinity(상한 없음 = 모델 기본 상한, Live)는 상한이 **어떤 꼴로도 없고** 헬퍼 결과 말고는 펼침도 없을 때만.
+ */
+function capOf(config: ts.ObjectLiteralExpression, call: ts.CallExpression, sf: ts.SourceFile): number | string {
+  const m = readKey(config, "maxOutputTokens", sf, isOwnTuning(call));
+  if (m.unverifiable.length > 0) return m.unverifiable.join(", ");
+  if (m.value === undefined) return Infinity;
+  return ts.isNumericLiteral(m.value) ? Number(m.value.text) : m.value.getText(sf);
+}
+
+/** 헬퍼 호출마다 (오늘 세대에 싣는 thinkingBudget, 그 결과가 펼쳐진 config의 maxOutputTokens) 쌍 */
 function thinkingHeadroom(fileName: string, text: string): Headroom[] {
   const sf = parse(fileName, text);
   const rows: Headroom[] = [];
   const visit = (node: ts.Node): void => {
     if (isHelperCall(node)) {
       const at = `${fileName}:${sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1}`;
-      const b = propValue(node.arguments[1], "thinkingBudget");
-      const budget = b === undefined ? "<thinkingBudget 없음>"
-        : ts.isNumericLiteral(b) ? Number(b.text)
-        : ENV_BUDGET_DEFAULT[fileName] ?? b.getText(sf);
+      const budget = budgetOf(node, fileName, sf);
       const configs = configsOf(node);
       if (configs.length === 0) rows.push({ at, budget, maxOutputTokens: "<config를 못 찾음>" });
-      for (const c of configs) {
-        const m = propValue(c, "maxOutputTokens");
-        rows.push({ at, budget, maxOutputTokens: m === undefined ? Infinity : ts.isNumericLiteral(m) ? Number(m.text) : m.getText(sf) });
-      }
+      for (const c of configs) rows.push({ at, budget, maxOutputTokens: capOf(c, node, sf) });
     }
     ts.forEachChild(node, visit);
   };
@@ -266,10 +317,55 @@ describe("스캐너 자체 검증 — 공허한 게이트가 아니다", () => {
       "h.ts:9 thinkingBudget=1 maxOutputTokens=<config를 못 찾음>",
     ]);
   });
+
+  it("thinking 여유 — 축약형·다른 펼침·계산된 키·접근자는 원문으로 위반, '상한 없음'은 헬퍼 결과만 펼친 config뿐", () => {
+    const T = `geminiTuning(m, { thinkingBudget: 64, thinkingLevel: "low" })`;
+    const src = [
+      `const a = { ...${T}, maxOutputTokens };`,
+      `const b = { ...${T}, ...LIMITS };`,
+      `const c = { ...${T}, maxOutputTokens: 256, ...LIMITS };`,
+      `const d = { ...LIMITS, ...${T}, maxOutputTokens: 256 };`,
+      `const e = { ...${T}, [K]: 64 };`,
+      `const f = { ...${T}, get maxOutputTokens() { return 64; } };`,
+      `function g() {`,
+      `  const t = ${T};`,
+      `  return { systemInstruction, ...t, tools };`,
+      `}`,
+      `const i = { ...geminiTuning(m, { thinkingBudget: 64, ...OVR, thinkingLevel: "low" }), maxOutputTokens: 256 };`,
+      `const j = { ...geminiTuning(m, { thinkingBudget, thinkingLevel: "low" }), maxOutputTokens: 256 };`,
+      `const k = { ...geminiTuning(m, opts), maxOutputTokens: 256 };`,
+    ].join("\n");
+    const rows = thinkingHeadroom("n.ts", src);
+    expect(rows).toEqual([
+      { at: "n.ts:1", budget: 64, maxOutputTokens: "maxOutputTokens" },
+      { at: "n.ts:2", budget: 64, maxOutputTokens: "...LIMITS" },
+      { at: "n.ts:3", budget: 64, maxOutputTokens: "...LIMITS" },
+      { at: "n.ts:4", budget: 64, maxOutputTokens: "...LIMITS" },
+      { at: "n.ts:5", budget: 64, maxOutputTokens: "[K]: 64" },
+      { at: "n.ts:6", budget: 64, maxOutputTokens: "get maxOutputTokens() { return 64; }" },
+      { at: "n.ts:8", budget: 64, maxOutputTokens: Infinity },
+      { at: "n.ts:11", budget: "...OVR", maxOutputTokens: 256 },
+      { at: "n.ts:12", budget: "thinkingBudget", maxOutputTokens: 256 },
+      { at: "n.ts:13", budget: "<객체 리터럴 아님: opts>", maxOutputTokens: 256 },
+    ]);
+    // 다른 키의 축약형(systemInstruction·tools)과 헬퍼 결과 변수 펼침만 있는 config(8행)만 통과
+    expect(headroomViolations(rows)).toEqual([
+      "n.ts:1 thinkingBudget=64 maxOutputTokens=maxOutputTokens",
+      "n.ts:2 thinkingBudget=64 maxOutputTokens=...LIMITS",
+      "n.ts:3 thinkingBudget=64 maxOutputTokens=...LIMITS",
+      "n.ts:4 thinkingBudget=64 maxOutputTokens=...LIMITS",
+      "n.ts:5 thinkingBudget=64 maxOutputTokens=[K]: 64",
+      "n.ts:6 thinkingBudget=64 maxOutputTokens=get maxOutputTokens() { return 64; }",
+      "n.ts:11 thinkingBudget=...OVR maxOutputTokens=256",
+      "n.ts:12 thinkingBudget=thinkingBudget maxOutputTokens=256",
+      "n.ts:13 thinkingBudget=<객체 리터럴 아님: opts> maxOutputTokens=256",
+    ]);
+  });
 });
 
 describe("app/·lib/ — Gemini 샘플링·thinking 키는 헬퍼 안에서만", () => {
-  const files = ROOTS.flatMap(listSources).filter((f) => f !== HELPER_FILE);
+  const sources = ROOTS.flatMap(listSources);
+  const files = sources.filter((f) => f !== HELPER_FILE);
 
   it("스캔 범위가 실제 소스 전체다 (빈 목록으로 녹색이 되지 않게)", () => {
     expect(files.length).toBeGreaterThan(50);
@@ -285,6 +381,14 @@ describe("app/·lib/ — Gemini 샘플링·thinking 키는 헬퍼 안에서만",
   it.each(Object.entries(ROUTED_FILES))("%s — 헬퍼 호출 %i곳", (file, expected) => {
     // 🔒 줄면: 그 호출부가 헬퍼를 떼고 샘플링·thinking을 아예 안 보내게 됐다(오늘 요청이 바뀐다)
     expect(countHelperCalls(file, readFileSync(file, "utf-8"))).toBe(expected);
+  });
+
+  it("역방향 인벤토리 — 헬퍼 호출이 있는 파일과 호출 수가 ROUTED_FILES와 정확히 같다(헬퍼 파일 포함 전체)", () => {
+    const inventory = Object.fromEntries(sources
+      .map((f) => [f, countHelperCalls(f, readFileSync(f, "utf-8"))] as const)
+      .filter(([, n]) => n > 0));
+    // 🔒 표에 없는 파일·호출이 보이면: 그 호출부는 thinkingLevel·thinking 여유 검사를 받지 않고 지나간다 — ROUTED_FILES에 올려라
+    expect(inventory).toEqual(ROUTED_FILES);
   });
 });
 
