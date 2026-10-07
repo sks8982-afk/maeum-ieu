@@ -106,8 +106,8 @@ describe("thinking 여유 검사기 — 공허하지 않다", () => {
 });
 
 describe("동반자 getTextModel — HEAD 그대로", () => {
-  // thinkingBudget 512 = COMPANION_THINKING_BUDGET 기본값. gemini-config-contract의 ENV_BUDGET이 이 값을
-  //   빌려 thinking 여유 불변식을 본다(env 예산은 소스에서 못 읽는다) — 기본값을 바꾸면 둘 다 바꿀 것.
+  // thinkingBudget 512 = COMPANION_THINKING_BUDGET 기본값. gemini-config-contract의 ENV_BUDGET(helpers/gemini-source-scan)이
+  //   이 값을 빌려 thinking 여유 불변식을 본다(env 예산은 소스에서 못 읽는다) — 기본값을 바꾸면 둘 다 바꿀 것.
   const base = {
     temperature: 0.7, maxOutputTokens: 2048, thinkingConfig: { thinkingBudget: 512 },
     safetySettings: SAFETY, tools: undefined, abortSignal: SIGNAL,

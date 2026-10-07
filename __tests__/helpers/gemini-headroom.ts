@@ -6,7 +6,7 @@
  *   잘린 JSON으로 잃었다(-1 → 재질문). 새 모델(thinkingLevel)엔 토큰 예산이 없어 대상이 아니다.
  *
  * 쓰는 곳:
- *   · gemini-config-contract — 소스 구문 트리에서 읽은 (예산, 상한) 쌍에 MIN_OUTPUT_HEADROOM을 쓴다
+ *   · gemini-config-contract — 소스 구문 트리에서 읽은 (예산, 상한) 쌍에 MIN_OUTPUT_HEADROOM을 쓴다(판독기 helpers/gemini-source-scan)
  *   · SDK 경계에서 붙잡은 실요청 — afterEach마다 headroomViolations: gemini-config-callsites(lib 호출부)·
  *     chat-stt-tuning·observe-turn-gates(STT)·live-token-gates(Live 토큰의 liveConnectConstraints)
  *   lib/chat/llm.ts도 같은 128로 동반자 예산 천장을 정한다(2048 − 128) — 이 값을 바꾸면 그 상수도 볼 것.
