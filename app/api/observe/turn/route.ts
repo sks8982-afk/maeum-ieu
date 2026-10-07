@@ -20,6 +20,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getGenAI, extractText, COMPANION_SAFETY_SETTINGS, logUsage, LLM_TIMEOUT_MS, timeoutSignal } from "@/lib/chat/llm";
+import { geminiTuning } from "@/lib/ai/gemini-config";
 import { evaluateSttConfidence } from "@/lib/chat/stt-confidence";
 import { detectWithBackstop, applyL1Escalation } from "@/lib/chat/emergency-evaluate";
 import { notifyGuardian } from "@/lib/chat/emergency-notify";
@@ -38,14 +39,17 @@ async function transcribe(audioB64: string, mimeType: string): Promise<string> {
     { text: "이 음성을 한국어로 정확하게 받아쓰기하세요. 받아쓰기한 텍스트만 출력하세요. 침묵이거나 잡음뿐이면 아무것도 출력하지 마세요. 들리지 않은 말을 지어내지 마세요." },
     { inlineData: { mimeType, data: audioB64 } },
   ];
+  const model = process.env.STT_MODEL || "gemini-2.5-flash";
   const res = await getGenAI().models.generateContent({
-    model: process.env.STT_MODEL || "gemini-2.5-flash",
+    model,
     contents: [{ role: "user", parts }],
     // ⚠ 타임아웃 — 없으면 Gemini가 매달리는 동안 요청이 끝나지 않았다(2026-10-06 적대 감사).
     //   단, 대화용 상한(LLM_TIMEOUT_MS.stt, 15초)을 그대로 쓰지 않는다: 감시는 **아무도 기다리지 않는** 경로라
     //   느려도 결국 성공할 전사(응급일 수 있다)를 끊는 손해가 더 크다. 클라에 대기열이 생겨(lib/voiceprint/
     //   segment-queue) "처리 중 조각 폐기"도 이미 사라졌다. 그래서 더 넉넉히, 그래도 매달림은 끝나게(재검토 반영).
-    config: { temperature: 0, maxOutputTokens: 1024, thinkingConfig: { thinkingBudget: 64 }, safetySettings: COMPANION_SAFETY_SETTINGS, abortSignal: timeoutSignal(OBSERVE_STT_TIMEOUT_MS) },
+    // 샘플링·thinking은 /api/chat 전사와 같은 값 — ≤3.8 모델엔 그대로, 3.9+·4+·별칭은 thinkingLevel "low"
+    //   (lib/ai/gemini-config). 새 모델에 thinkingBudget을 보내면 400이라 감시 전사가 전부 멈춘다(응급 포함).
+    config: { ...geminiTuning(model, { temperature: 0, thinkingBudget: 64, thinkingLevel: "low" }), maxOutputTokens: 1024, safetySettings: COMPANION_SAFETY_SETTINGS, abortSignal: timeoutSignal(OBSERVE_STT_TIMEOUT_MS) },
   });
   logUsage("observe-stt", res);
   return extractText(res, { isUserSpeech: true }).trim();

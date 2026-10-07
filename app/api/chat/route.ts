@@ -18,6 +18,7 @@ import { buildSystemPrompt } from "@/lib/chat/prompt";
 import { getPrefixCache } from "@/lib/chat/prompt-cache";
 import { EXCLUDE_OBSERVATION, neutralizeObservationPrefix } from "@/lib/chat/observation";
 import { getGenAI, getTextModel, buildFallbackMessage, generateWithFallback, extractText, COMPANION_SAFETY_SETTINGS, logUsage, LLM_TIMEOUT_MS, timeoutSignal } from "@/lib/chat/llm";
+import { geminiTuning } from "@/lib/ai/gemini-config";
 import { buildHistoryText, extractLastAiMessage } from "@/lib/chat/history-text";
 import { buildWordGameHint, buildNameAnswerHint, buildRepetitionHint, buildAnomalyCorrectionHint, buildFamilyQueryGuard, buildRecallVerificationHint, buildInfoRequestHint, buildProbeHoldHint, buildParentReferentHint, buildMentalCheckOfferHint } from "@/lib/chat/hints";
 import { detectLowEngagement, buildEngagementHint } from "@/lib/chat/engagement";
@@ -456,11 +457,14 @@ async function transcribeAudio(audioData: string, audioMimeType: string, hintsPr
     { inlineData: { mimeType: audioMimeType, data: audioData } },
   ];
 
+  const model = process.env.STT_MODEL || "gemini-2.5-flash"; // 비용 최적화: 음성 전사 — 3.5 불필요
   const res = await getGenAI().models.generateContent({
-    model: process.env.STT_MODEL || "gemini-2.5-flash", // 비용 최적화: 음성 전사 — 3.5 불필요
+    model,
     contents: [{ role: "user", parts }],
     // STT가 음성 왕복의 56%(평균 3.7s) 병목 — 전사엔 추론 불필요해 thinking 최소화(0은 빈응답 유발 금지, 64 클램프)
-    config: { temperature: 0, maxOutputTokens: 1024, thinkingConfig: { thinkingBudget: 64 }, safetySettings: COMPANION_SAFETY_SETTINGS, abortSignal: timeoutSignal(LLM_TIMEOUT_MS.stt) },
+    //   예산 64는 ≤3.8 모델에만 실린다. 3.9+·4+·별칭은 thinkingLevel "low"(lib/ai/gemini-config) — minimal이 더
+    //   가깝지만 3.7/3.8 Flash는 minimal을 400으로 거부해 전사가 통째로 멈춘다(거부되지 않는 쪽을 고름).
+    config: { ...geminiTuning(model, { temperature: 0, thinkingBudget: 64, thinkingLevel: "low" }), maxOutputTokens: 1024, safetySettings: COMPANION_SAFETY_SETTINGS, abortSignal: timeoutSignal(LLM_TIMEOUT_MS.stt) },
   });
   logUsage("stt", res);
   // isUserSpeech: STT 결과는 사용자 발화 — 동반자 출력용 보고체 필터(KO_REPORTIVE)를 적용하면

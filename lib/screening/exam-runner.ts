@@ -4,6 +4,7 @@
  */
 import { CIST_ITEMS, buildExamOrder, CIST_DOMAIN_ORDER, VOICE_MAX_POINTS, type CistItem } from "./cist-bank";
 import { getGenAI, COMPANION_SAFETY_SETTINGS, logUsage, LLM_TIMEOUT_MS, timeoutSignal } from "@/lib/chat/llm";
+import { geminiTuning } from "@/lib/ai/gemini-config";
 import { Type as SchemaType, type Schema } from "@google/genai";
 
 const SCORER_MODEL = "gemini-2.5-flash";
@@ -163,7 +164,9 @@ JSON으로만: {"scores":[{"itemId":"...","score":N,"reason":"간단근거"}]}`;
         return await getGenAI().models.generateContent({
           model: SCORER_MODEL,
           contents: prompt,
-          config: { temperature: 0, maxOutputTokens: 1024, responseMimeType: "application/json", responseSchema: SCORE_SCHEMA, thinkingConfig: { thinkingBudget: 512 }, safetySettings: COMPANION_SAFETY_SETTINGS, abortSignal: timeoutSignal(LLM_TIMEOUT_MS.background) },
+          // 예산 512는 ≤3.8 모델에만 실린다 — 3.9+·4+·별칭은 thinkingLevel "low"(lib/ai/gemini-config, 토큰 상한 아님:
+          //   그 모델로 바꿀 땐 maxOutputTokens 1024 안에서 JSON이 안 잘리는지와 채점 일치도를 실측)
+          config: { ...geminiTuning(SCORER_MODEL, { temperature: 0, thinkingBudget: 512, thinkingLevel: "low" }), maxOutputTokens: 1024, responseMimeType: "application/json", responseSchema: SCORE_SCHEMA, safetySettings: COMPANION_SAFETY_SETTINGS, abortSignal: timeoutSignal(LLM_TIMEOUT_MS.background) },
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

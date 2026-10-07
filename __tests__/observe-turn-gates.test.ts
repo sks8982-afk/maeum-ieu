@@ -228,6 +228,36 @@ describe("전사 타임아웃 (2026-10-06)", () => {
   });
 });
 
+/**
+ * 전사 샘플링·thinking은 lib/ai/gemini-config를 거친다(2026-10-07 Google 공지 — 다음 세대는 thinkingBudget·
+ *   temperature를 400으로 거부한다). 감시 전사가 400이 되면 응급을 포함한 모든 조각이 버려진다.
+ */
+describe("전사 샘플링·thinking — 모델 세대별 (2026-10-07)", () => {
+  it("오늘 모델(2.5)이면 HEAD(53eb438)와 같은 요청 — temperature 0 · thinkingBudget 64", async () => {
+    await call("오늘 날씨 좋네");
+    expect(sttConfigs.length).toBe(1);
+    const cfg = sttConfigs[0] as Record<string, unknown>;
+    // 🔒 키 집합까지 고정 — 헬퍼 결과를 안 펼치면 temperature·thinkingConfig가 통째로 빠진다
+    expect(Object.keys(cfg).sort()).toEqual(["abortSignal", "maxOutputTokens", "safetySettings", "temperature", "thinkingConfig"]);
+    expect(cfg.temperature).toBe(0);
+    expect(cfg.thinkingConfig).toStrictEqual({ thinkingBudget: 64 });
+    expect(cfg.maxOutputTokens).toBe(1024);
+  });
+
+  it("STT_MODEL을 새 세대로 올리면 temperature·thinkingBudget 없이 thinkingLevel LOW", async () => {
+    process.env.STT_MODEL = "gemini-4-flash";
+    try {
+      await call("오늘 날씨 좋네");
+    } finally {
+      delete process.env.STT_MODEL;
+    }
+    expect(sttConfigs.length).toBe(1);
+    const cfg = sttConfigs[0] as Record<string, unknown>;
+    expect(cfg).not.toHaveProperty("temperature");
+    expect(cfg.thinkingConfig).toStrictEqual({ thinkingLevel: "LOW" });
+  });
+});
+
 describe("감시 대상은 어르신 본인 계정만 (2026-10-06)", () => {
   it.each(["guardian", "pro", "general"])("%s 계정은 403이고 전사·저장·알림이 일어나지 않는다", async (role) => {
     session = { user: { id: `u-${role}`, screeningMode: role } };

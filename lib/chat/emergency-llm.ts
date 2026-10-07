@@ -10,6 +10,7 @@
  *       정규식·moderation 양쪽을 빠져나가던 과소감지 발견(2026-06-25). 정규식 보강 + 본 백스톱 병행.
  */
 import { getGenAI, COMPANION_SAFETY_SETTINGS, logUsage, LLM_TIMEOUT_MS, timeoutSignal } from "@/lib/chat/llm";
+import { geminiTuning } from "@/lib/ai/gemini-config";
 import { Type as SchemaType, type Schema } from "@google/genai";
 import type { EmergencyResult, EmergencyCategory } from "@/lib/chat/emergency";
 
@@ -74,11 +75,13 @@ JSON으로만: {"category":"...","level":N,"reason":"간단근거"}`;
       config: {
         // ⚠ maxOutputTokens는 thinking + 출력 합산 — thinkingBudget(256)보다 충분히 커야 JSON이 안 잘림
         //   (thinkingBudget 256 + maxOutputTokens 256이면 thinking이 예산을 다 먹어 출력이 잘려 파싱 실패)
-        temperature: 0,
+        //   예산 256은 ≤3.8 모델에만 실린다. 3.9+·4+·별칭은 thinkingBudget을 400으로 거부하므로 헬퍼가
+        //   thinkingLevel "low"로 바꾸는데, 수준은 **토큰 상한이 아니다** — 그 모델로 바꿀 땐 thinking이
+        //   1024 안에 들어오는지(=JSON이 안 잘리는지) 실측할 것. 잘려도 파싱 실패 → null(정규식만)로 조용히 꺼진다.
+        ...geminiTuning(MODEL, { temperature: 0, thinkingBudget: 256, thinkingLevel: "low" }),
         maxOutputTokens: 1024,
         responseMimeType: "application/json",
         responseSchema: SCHEMA,
-        thinkingConfig: { thinkingBudget: 256 },
         safetySettings: COMPANION_SAFETY_SETTINGS, abortSignal: timeoutSignal(LLM_TIMEOUT_MS.emergency),
       },
     });

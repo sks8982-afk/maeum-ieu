@@ -13,6 +13,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { GoogleGenAI, Modality } from "@google/genai";
+import { geminiTuning } from "@/lib/ai/gemini-config";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { buildSystemPrompt, GENERAL_NO_COGNITIVE_RULE } from "@/lib/chat/prompt";
@@ -167,7 +168,11 @@ ${cognitiveGuide}
             inputAudioTranscription: {},
             outputAudioTranscription: {},
             // PoC: thinking 미제한 시 첫 오디오 +2.6s — Live 경로에선 0이 정상 작동(3.1에서도 검증)
-            thinkingConfig: { thinkingBudget: 0 },
+            //   예산 0은 ≤3.8 모델에만 실린다. 3.9+·4+·별칭은 thinkingBudget을 400으로 거부하므로 헬퍼가
+            //   '사고 없음'에 해당하는 thinkingLevel "minimal"로 바꾼다(lib/ai/gemini-config). ⚠ 모델마다 다르다:
+            //   3.8 Live는 thinkingLevel 자체를, 3.8 Live Extended Thinking은 minimal을 받지 않는다(문서) —
+            //   LIVE_MODEL을 바꿀 땐 그 모델의 지원표부터 확인하고 실기기로 첫 오디오 지연을 재측정할 것.
+            ...geminiTuning(LIVE_MODEL, { thinkingBudget: 0, thinkingLevel: "minimal" }),
           },
         },
         httpOptions: { apiVersion: "v1alpha" },

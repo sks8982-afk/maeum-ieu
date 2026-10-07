@@ -147,3 +147,21 @@ describe("역할별 세션 지시문 — **발급되는 지시문 자체**를 �
     expect(issuedInstruction()).toContain("119");
   });
 });
+
+/**
+ * 세션 thinking은 lib/ai/gemini-config를 거친다(2026-10-07 Google 공지 — 다음 세대는 thinkingBudget을 400으로 거부).
+ *   오늘 모델(3.1 Live)엔 HEAD(53eb438)와 같은 제약이 실려야 한다 — 첫 오디오 지연을 위해 thinking 0.
+ */
+describe("Live 세션 thinking — 모델 세대별 (2026-10-07)", () => {
+  it("오늘 모델이면 thinkingBudget 0 그대로, temperature 같은 키는 생기지 않는다", async () => {
+    expect((await call()).status).toBe(200);
+    const constraints = createToken.mock.calls.at(-1)![0].config.liveConnectConstraints as unknown as {
+      model: string; config: Record<string, unknown>;
+    };
+    expect(constraints.model).toBe("gemini-3.1-flash-live-preview");
+    // 🔒 키 집합까지 고정 — 헬퍼 결과를 안 펼치면 thinkingConfig가 빠져 첫 오디오가 느려진다(PoC +2.6s)
+    expect(Object.keys(constraints.config).sort()).toEqual(
+      ["inputAudioTranscription", "outputAudioTranscription", "responseModalities", "systemInstruction", "thinkingConfig"]);
+    expect(constraints.config.thinkingConfig).toStrictEqual({ thinkingBudget: 0 });
+  });
+});

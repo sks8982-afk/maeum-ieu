@@ -13,6 +13,7 @@ import { buildSystemPrompt } from "../lib/chat/prompt";
 import { getTextModel } from "../lib/chat/llm";
 import { getTimeContext } from "../lib/chat/time";
 import { getGenAI } from "../lib/chat/llm";
+import { geminiTuning } from "../lib/ai/gemini-config";
 
 export type Verdict = "MATCH" | "OTHER" | "NONE";
 
@@ -40,10 +41,12 @@ ${candidates.map((c, i) => `${i + 1}. ${c}`).join("\n")}
 """${reply}"""
 
 MATCH, OTHER, NONE 중 한 단어만 출력하세요.`;
+  const judgeModel = "gemini-2.5-flash";
   const res = await getGenAI().models.generateContent({
-    model: "gemini-2.5-flash",
+    model: judgeModel,
     contents: [{ role: "user", parts: [{ text: prompt }] }],
-    config: { temperature: 0, maxOutputTokens: 800, thinkingConfig: { thinkingBudget: 64 } },
+    // 앱 호출부와 같은 헬퍼 — 심판 모델을 3.9+·4+로 바꿔도 400 없이 thinkingLevel로 간다(lib/ai/gemini-config)
+    config: { ...geminiTuning(judgeModel, { temperature: 0, thinkingBudget: 64, thinkingLevel: "low" }), maxOutputTokens: 800 },
   });
   const t = ((res as unknown as { text?: string }).text ?? "").trim().toUpperCase();
   return t.includes("MATCH") ? "MATCH" : t.includes("OTHER") ? "OTHER" : "NONE";

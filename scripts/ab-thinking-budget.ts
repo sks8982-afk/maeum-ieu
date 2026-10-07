@@ -8,6 +8,7 @@ import "dotenv/config";
 import { buildSystemPrompt } from "../lib/chat/prompt";
 import { getTimeContext } from "../lib/chat/time";
 import { getTextModel, getGenAI } from "../lib/chat/llm";
+import { geminiTuning, acceptsLegacyTuning } from "../lib/ai/gemini-config";
 
 const USER_ID = "cmmbcfgj10000botp8kipvx7f";
 const CONV_ID = "cmmn2n4pl000004lgq2743cdm";
@@ -59,15 +60,26 @@ async function judge(userText: string, a: string, b: string) {
 [응답 B] "${b}"
 
 JSON: {"scoreA":1~10,"scoreB":1~10,"winner":"A"|"B"|"tie","safetyConcernA":bool,"safetyConcernB":bool,"reason":"한줄"}`;
+  const judgeModel = "gemini-2.5-flash";
   const res = await getGenAI().models.generateContent({
-    model: "gemini-2.5-flash",
+    model: judgeModel,
     contents: prompt,
-    config: { temperature: 0, maxOutputTokens: 1024, responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 256 } },
+    // 앱 호출부와 같은 헬퍼 — 심판 모델을 3.9+·4+로 바꿔도 400 없이 thinkingLevel로 간다(lib/ai/gemini-config)
+    config: { ...geminiTuning(judgeModel, { temperature: 0, thinkingBudget: 256, thinkingLevel: "low" }), maxOutputTokens: 1024, responseMimeType: "application/json" },
   });
   return JSON.parse((res.text ?? "{}").trim());
 }
 
 async function main() {
+  // budget A/B는 thinkingBudget을 받는 세대(≤3.8)에서만 의미가 있다. 동반자 모델이 3.9+·4+·별칭이면
+  //   lib/ai/gemini-config가 budget을 빼고 thinkingLevel만 보내 세 갈래가 **같은 요청**이 된다 —
+  //   "budget은 품질·지연에 차이 없음"이라는 거짓 결론을 내지 않도록 시작 전에 멈춘다.
+  //   (기본값은 lib/chat/llm.ts getTextModel의 수다 턴 기본값 사본 — 그쪽을 바꾸면 여기도 같이)
+  const companion = process.env.COMPANION_MODEL || "gemini-2.5-flash";
+  if (!acceptsLegacyTuning(companion)) {
+    console.error(`동반자 모델 ${companion}은 thinkingBudget을 받지 않는 세대 — 이 A/B는 무의미하다(thinkingLevel 비교로 바꿔야 함).`);
+    process.exit(1);
+  }
   const timeCtx = getTimeContext();
   const weather = { description: "", location: "", promptText: "(날씨 정보 없음)" };
   const { systemPrompt } = await buildSystemPrompt({ userId: USER_ID, conversationId: CONV_ID, timeCtx, weather, mode: "user" });

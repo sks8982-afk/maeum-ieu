@@ -10,6 +10,7 @@
  */
 
 import { COMPANION_SAFETY_SETTINGS, logUsage, getGenAI } from "@/lib/chat/llm";
+import { geminiTuning } from "@/lib/ai/gemini-config";
 import { upsertFamilyMember, upsertFact, upsertProfile, type FamilyRelation } from "./profile";
 import { NAME_STOPWORDS_BASE, ABSTRACT_NOUN_BLOCKLIST } from "./name-vocab";
 
@@ -85,11 +86,13 @@ export async function extractWithLLM(params: {
 
   try {
     const prompt = LLM_PROMPT.replace("{USER_MESSAGE}", params.userMessage.slice(0, 500));
+    const model = "gemini-2.5-flash"; // 비용 최적화: 단순 정보추출 — 3.5 불필요
     const res = await getGenAI().models.generateContent({
-      model: "gemini-2.5-flash", // 비용 최적화: 단순 정보추출 — 3.5 불필요
+      model,
       contents: prompt,
       // thinkingBudget 미지정 시 추출 1회당 thinking ~750tok 누수(비용 실측 2026-06-12) — 단순 추출엔 불필요
-      config: { temperature: 0.1, maxOutputTokens: 1024, responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 128 }, safetySettings: COMPANION_SAFETY_SETTINGS },
+      //   (예산은 ≤3.8 모델에만 실린다. 3.9+·4+·별칭은 thinkingLevel "low" — lib/ai/gemini-config)
+      config: { ...geminiTuning(model, { temperature: 0.1, thinkingBudget: 128, thinkingLevel: "low" }), maxOutputTokens: 1024, responseMimeType: "application/json", safetySettings: COMPANION_SAFETY_SETTINGS },
     });
     logUsage("profile", res);
     const raw = (res.text ?? "").trim();

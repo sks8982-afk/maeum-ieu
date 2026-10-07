@@ -14,8 +14,11 @@
 
 import { Type as SchemaType, type Schema } from "@google/genai";
 import { COMPANION_SAFETY_SETTINGS, logUsage, getGenAI, LLM_TIMEOUT_MS, timeoutSignal } from "@/lib/chat/llm";
+import { geminiTuning } from "@/lib/ai/gemini-config";
 import { prisma } from "@/lib/prisma";
 
+// 아래 두 호출의 thinking 예산(512)은 ≤3.8 모델에만 실린다. 3.9+·4+·별칭으로 바꾸면 lib/ai/gemini-config가
+//   thinkingLevel "low"로 보내는데, 수준은 토큰 상한이 아니므로 그때 JSON 잘림(maxOutputTokens 3072)을 실측할 것.
 const SUMMARY_MODEL = "gemini-2.5-flash"; // 비용 최적화: 요약은 단순 압축 — 3.5 불필요
 export type SummaryLevel = "weekly" | "monthly" | "yearly";
 
@@ -113,7 +116,7 @@ export async function summarizeMessages(params: {
       model: SUMMARY_MODEL,
       contents: `${SUMMARY_PROMPT}\n\n[대화]\n${transcript}`,
       // thinkingConfig로 thinking 예산 제한 — 안 하면 thinking(~2900)이 maxOutputTokens를 먹어 JSON이 잘림.
-      config: { temperature: 0.2, maxOutputTokens: 3072, responseMimeType: "application/json", responseSchema: SUMMARY_SCHEMA, thinkingConfig: { thinkingBudget: 512 }, safetySettings: COMPANION_SAFETY_SETTINGS, abortSignal: timeoutSignal(LLM_TIMEOUT_MS.background) },
+      config: { ...geminiTuning(SUMMARY_MODEL, { temperature: 0.2, thinkingBudget: 512, thinkingLevel: "low" }), maxOutputTokens: 3072, responseMimeType: "application/json", responseSchema: SUMMARY_SCHEMA, safetySettings: COMPANION_SAFETY_SETTINGS, abortSignal: timeoutSignal(LLM_TIMEOUT_MS.background) },
     });
     logUsage("summarizer", res);
     const raw = (res.text ?? "").trim();
@@ -171,7 +174,7 @@ export async function rollupSummaries(params: {
       model: SUMMARY_MODEL,
       contents: `${META_SUMMARY_PROMPT}\n\n[하위 요약들]\n${transcript}`,
       // thinkingConfig로 thinking 예산 제한 — 안 하면 thinking(~2900)이 maxOutputTokens를 먹어 JSON이 잘림.
-      config: { temperature: 0.2, maxOutputTokens: 3072, responseMimeType: "application/json", responseSchema: SUMMARY_SCHEMA, thinkingConfig: { thinkingBudget: 512 }, safetySettings: COMPANION_SAFETY_SETTINGS, abortSignal: timeoutSignal(LLM_TIMEOUT_MS.background) },
+      config: { ...geminiTuning(SUMMARY_MODEL, { temperature: 0.2, thinkingBudget: 512, thinkingLevel: "low" }), maxOutputTokens: 3072, responseMimeType: "application/json", responseSchema: SUMMARY_SCHEMA, safetySettings: COMPANION_SAFETY_SETTINGS, abortSignal: timeoutSignal(LLM_TIMEOUT_MS.background) },
     });
     logUsage("summarizer-rollup", res);
     const { summary, keyFacts } = parseLLMOutput((res.text ?? "").trim());

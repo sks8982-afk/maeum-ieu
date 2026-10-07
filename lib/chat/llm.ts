@@ -6,6 +6,7 @@
  *   어댑터를 반환 — 스트리밍 문장 안전망(route.ts)이 무변경으로 동작.
  */
 import { GoogleGenAI, HarmCategory, HarmBlockThreshold, type GenerateContentResponse } from "@google/genai";
+import { geminiTuning } from "@/lib/ai/gemini-config";
 import { nameSubj } from "@/lib/chat/korean-particle";
 import { salvageJsonLeak } from "@/lib/chat/sanitize";
 
@@ -111,6 +112,8 @@ export function getTextModel(systemInstruction: string, enableSearch: boolean = 
   // gemini-3.5-flash는 thinking 모델 — 기본(무제한) thinking 예산이면 출력 전 ~10초 추론(응답 지연 주범).
   //   thinkingBudget을 낮은 양수로 제한해 추론시간 단축(첫 응답 빨라짐). 0은 빈응답 유발이라 금지(최소 64로 클램프).
   //   responseDelay 측정으로 도입(2026-06-05). COMPANION_THINKING_BUDGET env로 A/B 튜닝 가능(2026-06-11).
+  //   ※ 이 예산은 ≤3.8 모델에만 실린다. 3.9+·4+·별칭 모델은 thinkingBudget을 400으로 거부하므로
+  //     lib/ai/gemini-config가 thinkingLevel "low"로 바꿔 보낸다(예산을 둔 목적 = 사고 제한).
   const parsed = parseInt(process.env.COMPANION_THINKING_BUDGET || "512", 10);
   const THINKING_BUDGET = Number.isFinite(parsed) && parsed >= 64 ? parsed : 512;
   // 키 미설정 시 **동기 throw 금지** — 호출부(route.ts)는 getTextModel을 폴백 try 블록 *바깥*에서
@@ -133,21 +136,22 @@ export function getTextModel(systemInstruction: string, enableSearch: boolean = 
   const model = probeTurn
     ? (process.env.COMPANION_PROBE_MODEL || "gemini-3.8-flash")
     : (process.env.COMPANION_MODEL || "gemini-2.5-flash");
+  // 샘플링·thinking은 모델 세대별로 고른다(lib/ai/gemini-config) — 2.5·≤3.8엔 아래 값 그대로(오늘 요청 불변).
+  //   temperature 0.7이 실제로 듣는 건 수다 턴의 2.5뿐이다 — 확인 턴의 3.8은 3.6 이후 temperature를 무시한다.
+  const tuning = geminiTuning(model, { temperature: 0.7, thinkingBudget: THINKING_BUDGET, thinkingLevel: "low" });
   // 명시적 캐시 사용 시 systemInstruction은 캐시에 포함됨 → 호출 config엔 cachedContent만(둘 다 지정 불가).
   const config = cachedContent
     ? {
         cachedContent,
-        temperature: 0.7,
+        ...tuning,
         maxOutputTokens: 2048,
-        thinkingConfig: { thinkingBudget: THINKING_BUDGET },
         safetySettings: COMPANION_SAFETY_SETTINGS,
         tools,
       }
     : {
         systemInstruction,
-        temperature: 0.7,
+        ...tuning,
         maxOutputTokens: 2048,
-        thinkingConfig: { thinkingBudget: THINKING_BUDGET },
         safetySettings: COMPANION_SAFETY_SETTINGS,
         tools,
       };

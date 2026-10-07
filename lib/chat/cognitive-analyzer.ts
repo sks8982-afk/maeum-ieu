@@ -5,6 +5,7 @@
 
 import { Type as SchemaType, type Schema } from "@google/genai";
 import { COMPANION_SAFETY_SETTINGS, logUsage, getGenAI, LLM_TIMEOUT_MS, timeoutSignal } from "@/lib/chat/llm";
+import { geminiTuning } from "@/lib/ai/gemini-config";
 import type { CognitiveAnalysisResult } from "./types";
 import { COGNITIVE_DOMAINS } from "./constants";
 import { normalizeDialect } from "./dialect-normalize";
@@ -547,12 +548,16 @@ function buildAnalyzerModel(_apiKey: string, modelName: string) {
       contents: promptText,
       // thinkingConfig로 thinking 예산 제한 — 안 하면 thinking이 maxOutputTokens를 먹어
       // JSON이 잘림(요약기에서 잡은 동일 버그 클래스). 0은 채점 품질 저하로 금지.
+      //   ※ 예산(1024)은 ≤3.8 모델에만 실린다. 3.9+·4+·별칭은 thinkingLevel "low"(lib/ai/gemini-config) —
+      //     medium(3.8 기본값)은 사실상 제한 해제라 위의 JSON 잘림을 되살린다. 전환 시 matrix 재검증 필수.
+      // temperature 0: 2.5(lite 1차 채점)에선 비결정성을 줄이는 실효 값이다. 3.8(정밀 채점)은 3.6 이후
+      //   temperature를 **무시**한다 — 3.8의 채점 일관성은 이 값에서 오지 않는다. 오늘 요청과 같게 보내려고
+      //   남겨 둔 것이고, 새 모델엔 헬퍼가 뺀다(보내면 400).
       config: {
-        temperature: 0, // 채점 일관성 — 같은 발화는 같은 점수(비결정성 최소화)
+        ...geminiTuning(modelName, { temperature: 0, thinkingBudget: 1024, thinkingLevel: "low" }),
         maxOutputTokens: 2048,
         responseMimeType: "application/json",
         responseSchema: RESPONSE_SCHEMA, // 구조 강제 → truncation·파싱 실패로 인한 평가 유실 방지
-        thinkingConfig: { thinkingBudget: 1024 },
         safetySettings: COMPANION_SAFETY_SETTINGS, abortSignal: timeoutSignal(LLM_TIMEOUT_MS.background), // 화투·약주 등 일상어 차단 방지(차단 시 그 턴 평가 유실)
       },
     }),

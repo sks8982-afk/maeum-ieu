@@ -6,6 +6,7 @@
  */
 import { Type as SchemaType, type Schema } from "@google/genai";
 import { COMPANION_SAFETY_SETTINGS, logUsage, getGenAI } from "@/lib/chat/llm";
+import { geminiTuning } from "@/lib/ai/gemini-config";
 
 // 순서 중요 — 강한 빈도(3)부터 검사 (예: "거의 매일"이 "며칠"보다 먼저)
 const FAST_PATTERNS: Array<{ score: 0 | 1 | 2 | 3; pattern: RegExp }> = [
@@ -99,10 +100,14 @@ export async function classifyAnswer(answer: string, answerType: "freq4" | "agre
 
   if (!process.env.GEMINI_API_KEY) return -1;
   try {
+    const model = "gemini-2.5-flash";
     const res = await getGenAI().models.generateContent({
-      model: "gemini-2.5-flash",
+      model,
       contents: `${cfg.prompt}\nJSON {"score": n} 만 출력.\n\n답변: ${answer.slice(0, 200)}`,
-      config: { temperature: 0, maxOutputTokens: 64, responseMimeType: "application/json", responseSchema: SCHEMA, thinkingConfig: { thinkingBudget: 64 }, safetySettings: COMPANION_SAFETY_SETTINGS },
+      // ⚠ maxOutputTokens(64)는 thinking을 포함한다. 예산 64는 ≤3.8 모델에만 실리고, 3.9+·4+·별칭은
+      //   thinkingLevel "low"(lib/ai/gemini-config — 토큰 상한이 아님)가 된다 → 그 모델로 바꿀 땐 64를 반드시
+      //   올리고 실측할 것. 안 그러면 thinking이 출력을 다 먹어 JSON이 잘리고, 분류 -1(재질문)이 반복된다.
+      config: { ...geminiTuning(model, { temperature: 0, thinkingBudget: 64, thinkingLevel: "low" }), maxOutputTokens: 64, responseMimeType: "application/json", responseSchema: SCHEMA, safetySettings: COMPANION_SAFETY_SETTINGS },
     });
     logUsage("mental-classify", res);
     const parsed = JSON.parse((res.text ?? "").trim()) as { score?: number };
