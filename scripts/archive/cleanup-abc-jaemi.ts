@@ -1,11 +1,12 @@
 /** abc 계정의 잘못 박힌 "재미" family_member row 1건 삭제 (잘못된 추출로 박힌 잔여 데이터) */
 import "dotenv/config";
 const { Pool } = require("pg");
+import { pgTlsOptions } from "../../lib/db-tls";
 
 async function main() {
-  let cs = process.env.DATABASE_URL!;
-  try { const u = new URL(cs); u.searchParams.set("sslmode", "no-verify"); cs = u.toString(); } catch {}
-  const pool = new Pool({ connectionString: cs, ssl: { rejectUnauthorized: false } });
+  // TLS는 앱과 같은 정책(lib/db-tls, 2026-10-07 8차) — RDS면 인증서를 검증하고, 검증을 끄는 건 DATABASE_SSL_NO_VERIFY=1뿐이다
+  const { connectionString, ssl } = pgTlsOptions(process.env.DATABASE_URL!);
+  const pool = new Pool({ connectionString, ...(ssl ? { ssl } : {}) });
   const c = await pool.connect();
   try {
     const u = await c.query(`SELECT id FROM "User" WHERE email = 'abc@abc.com'`);

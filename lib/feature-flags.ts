@@ -16,6 +16,7 @@
  *   · 두 값이 갈릴 때의 안전한 방향: **API가 권위**다. UI가 열려 있는데 API가 막으면
  *     사용자는 오류를 보지만 안전하고, 반대는 아무 일도 안 일어난다(아무도 안 부른다).
  */
+import { flagOn } from "@/lib/flags";
 
 /**
  * Live(실시간 음성) 베타가 **서버에서** 허용되는가.
@@ -28,6 +29,7 @@
  */
 export function isLiveBetaEnabledServer(): boolean {
   const runtime = process.env.LIVE_BETA_ENABLED?.trim();
-  if (runtime) return runtime === "1";
-  return process.env.NEXT_PUBLIC_SHOW_LIVE_BETA === "1";
+  if (runtime) return flagOn(runtime);
+  // 빌드 타임 값의 켜짐/꺼짐은 배포 점검(scripts/check-env.ts)과 같은 함수로(lib/flags — 정확히 "1"만 켠다)
+  return flagOn(process.env.NEXT_PUBLIC_SHOW_LIVE_BETA);
 }

@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import { normalizeMode } from "@/lib/roles";
+import { flagOn } from "@/lib/flags";
 import { LogoutButton } from "./LogoutButton";
 import { BrandLogo, CompanyLogo, TalkBadge } from "./BrandLogo";
 
@@ -51,7 +52,7 @@ export default async function Home() {
   // 어르신 홈 — 큼지막한 [대화하기] + 하단 작은 3개 (치매 의심 어르신도 쉽게)
   const name = session.user.name?.trim();
   // 라이브베타 켜져 있으면 음성 동선은 /live로 바로(중간 /chat 선택화면 스킵). ?start=1로 도착 즉시 자동 시작.
-  const talkHref = process.env.NEXT_PUBLIC_SHOW_LIVE_BETA === "1" ? "/live?start=1" : "/chat?start=1";
+  const talkHref = flagOn(process.env.NEXT_PUBLIC_SHOW_LIVE_BETA) ? "/live?start=1" : "/chat?start=1";
   return (
     <div className="flex min-h-screen flex-col bg-gradient-to-b from-sky-50 to-[#eef2f7] px-5 pb-6 pt-5 dark:from-[#0b1220] dark:to-[#0b0d10]">
       {/* 상단 브랜드 + 로그아웃 */}

@@ -110,8 +110,9 @@ export async function PATCH(req: Request) {
   if (guardianWebhookUrl !== undefined) {
     const url = (guardianWebhookUrl ?? "").trim();
     if (url) {
-      let host = "";
-      try { host = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, ""); } catch { /* invalid */ }
+      let parsed: URL | null = null;
+      try { parsed = new URL(url); } catch { /* invalid — 아래 host가 비어 isPrivate로 걸린다 */ }
+      const host = parsed ? parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "") : "";
       const isHttps = /^https:\/\//i.test(url); // 민감 발화 평문 전송 방지 — https 전용
       // SSRF 방어 — 내부/사설/링크로컬/CGNAT 대역 차단(공개 webhook만 허용)
       const isPrivate = !host
@@ -122,6 +123,11 @@ export async function PATCH(req: Request) {
         || /^100\.(6[4-9]|[7-9]\d|1[0-1]\d|12[0-7])\./.test(host);
       if (!isHttps || isPrivate) {
         return NextResponse.json({ error: "Webhook URL은 공개된 https 주소여야 합니다(http·내부·사설 주소 불가)." }, { status: 400 });
+      }
+      // 주소에 아이디·비밀번호(https://아이디:비밀번호@…)를 싣지 못하게 — 발송 때도 막는다(lib/chat/emergency-notify-webhook
+      //   isSafeWebhookUrl, 2026-10-07 8차). 저장해 두면 그 비밀이 주소와 함께 다니고, 위급 알림에선 메신저 사본이 영구 실패로 빠진다
+      if (parsed && (parsed.username || parsed.password)) {
+        return NextResponse.json({ error: "Webhook URL에 아이디·비밀번호를 넣을 수 없습니다(https://아이디:비밀번호@… 형식 불가). 메신저가 준 웹훅 주소를 그대로 넣어 주세요." }, { status: 400 });
       }
     }
     updateData.guardianWebhookUrl = url || null;

@@ -15,6 +15,7 @@
  */
 import { chromium } from "playwright";
 import pg from "pg";
+import { pgTlsOptions } from "./db-tls.mjs";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import "dotenv/config";
 
@@ -169,10 +170,9 @@ async function sendAndRead(page, text) {
   console.log(`   앱 모델: gemini-3.5-flash  ·  페르소나 생성기: ${PERSONA_MODEL}`);
   console.log(`   어르신: ${PERSONA.name}(${PERSONA.age}, ${PERSONA.honorific}) · 동반자: ${PERSONA.companion}(${PERSONA.relation}) · ${TURNS}턴\n`);
 
-  const pool = new pg.Pool({
-    connectionString: (() => { let cs = process.env.DATABASE_URL; try { const u = new URL(cs); u.searchParams.set("sslmode", "no-verify"); cs = u.toString(); } catch {} return cs; })(),
-    ssl: { rejectUnauthorized: false },
-  });
+  // TLS는 앱과 같은 정책(scripts/db-tls.mjs → lib/db-tls, 2026-10-07 8차) — 검증을 끄는 건 DATABASE_SSL_NO_VERIFY=1뿐이다
+  const { connectionString, ssl } = pgTlsOptions(process.env.DATABASE_URL);
+  const pool = new pg.Pool({ connectionString, ...(ssl ? { ssl } : {}) });
   const browser = await chromium.launch({ headless: !HEADED, slowMo: HEADED ? 60 : 0 });
   const ctx = await browser.newContext({ viewport: { width: 480, height: 860 } });
   const page = await ctx.newPage();

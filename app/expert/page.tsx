@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ThemeToggle } from "../theme-toggle";
 import { LogoutButton } from "../LogoutButton";
+import { PushStatusBox } from "./PushStatusBox";
 
 
 interface PatientRow {
@@ -128,6 +129,8 @@ export default function ExpertPage() {
                   {copied ? "복사됨 ✓" : "복사"}
                 </button>
               </div>
+              {/* 이 계정으로 위급 알림을 받는 휴대폰 — 없거나 꺼져 있으면 경고(2026-10-07, PushStatusBox 주석) */}
+              <PushStatusBox />
               {/* 2026-10-07: 앱 푸시가 오려면 무엇이 필요한지 화면 어디에도 없었다 — 연결만 하고 앱에 로그인하지 않은
                   보호자는 알림을 못 받는데도 "위급 알림을 받을 수 있어요"로만 안내됐다(보호자 앱 푸시 추적) */}
               <div className="mt-4 rounded-xl bg-white/70 px-4 py-3 text-xs leading-relaxed text-teal-900 dark:bg-zinc-900/60 dark:text-teal-100">

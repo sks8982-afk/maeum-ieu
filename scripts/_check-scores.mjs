@@ -5,6 +5,7 @@
  *       그리고 전체 도메인 평균(overallAvg) 기반 종합등급 추정.
  */
 import pg from "pg";
+import { pgTlsOptions } from "./db-tls.mjs";
 import "dotenv/config";
 
 const email = process.argv[2];
@@ -15,9 +16,9 @@ if (!email) {
 }
 
 function pgPool() {
-  let cs = process.env.DATABASE_URL;
-  try { const u = new URL(cs); u.searchParams.set("sslmode", "no-verify"); cs = u.toString(); } catch {}
-  return new pg.Pool({ connectionString: cs, ssl: { rejectUnauthorized: false } });
+  // TLS는 앱과 같은 정책(scripts/db-tls.mjs → lib/db-tls, 2026-10-07 8차) — 검증을 끄는 건 DATABASE_SSL_NO_VERIFY=1뿐이다
+  const { connectionString, ssl } = pgTlsOptions(process.env.DATABASE_URL);
+  return new pg.Pool({ connectionString, ...(ssl ? { ssl } : {}) });
 }
 
 // severity 임계값(lib/health/severity.ts와 동기): <0.3 정상 / <0.8 경증 / <1.5 중증 / >=1.5 고위험

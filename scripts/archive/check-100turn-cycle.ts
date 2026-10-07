@@ -1,10 +1,11 @@
 import "dotenv/config";
 const { Pool } = require("pg");
+import { pgTlsOptions } from "../../lib/db-tls";
 
 (async () => {
-  let s = process.env.DATABASE_URL!;
-  try { const u = new URL(s); u.searchParams.set("sslmode", "no-verify"); s = u.toString(); } catch {}
-  const pool = new Pool({ connectionString: s, ssl: { rejectUnauthorized: false } });
+  // TLS는 앱과 같은 정책(lib/db-tls, 2026-10-07 8차) — RDS면 인증서를 검증하고, 검증을 끄는 건 DATABASE_SSL_NO_VERIFY=1뿐이다
+  const { connectionString, ssl } = pgTlsOptions(process.env.DATABASE_URL!);
+  const pool = new Pool({ connectionString, ...(ssl ? { ssl } : {}) });
   const c = await pool.connect();
   try {
     // 최근 80분 사용자 발화 (Playwright 100턴 + 사이클간 약간의 마진)

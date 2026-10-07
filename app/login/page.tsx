@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { ThemeToggle } from "../theme-toggle";
 import { BrandLogo, CompanyLogo } from "../BrandLogo";
 import { LATEST_APP_VERSION, isOlderVersion } from "@/lib/app-version";
+import { AppDownload } from "./AppDownload";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -14,7 +15,9 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [remember, setRemember] = useState(false);
   const [appVersion, setAppVersion] = useState<string | null>(null); // RN 앱이 주입한 설치 버전(알 수 없으면 null)
-  const [inApp, setInApp] = useState(false);   // RN 앱(WebView) 안에서 실행 중인지
+  // RN 앱(WebView) 안에서 실행 중인지 — null은 아직 모름(서버 렌더·첫 그리기). 알기 전엔 앱 받기 영역을 그리지 않는다(2026-10-08 10차):
+  //   예전엔 false(브라우저)로 시작해, Play로 받은 앱 웹뷰에도 하이드레이션 전까지 웹 APK 링크가 보였다(AppDownload Play 정책 주석)
+  const [inApp, setInApp] = useState<boolean | null>(null);
   const [updateNeeded, setUpdateNeeded] = useState(false);
 
   // 저장된 아이디(이메일) 자동 채움
@@ -108,28 +111,9 @@ export default function LoginPage() {
             {loading ? "로그인 중..." : "로그인"}
           </button>
         </form>
-        {/* 업데이트 안내 — 설치된 앱이 최신보다 낮을 때 */}
-        {updateNeeded && (
-          <div className="mt-3 rounded-xl border border-amber-400 bg-amber-50 px-3 py-2.5 text-center text-sm text-amber-800 dark:border-amber-600 dark:bg-amber-900/20 dark:text-amber-200">
-            ⚠️ 새 버전 <b>v{LATEST_APP_VERSION}</b>이 나왔어요. 아래에서 최신 앱으로 업데이트해 주세요.
-            <span className="block text-xs text-amber-600 dark:text-amber-300/80">현재 버전: {appVersion ? `v${appVersion}` : "확인 불가(구버전)"}</span>
-          </div>
-        )}
-        {/* 앱 다운로드 (임시 — Play Store 정식 배포 전까지 접근성용. 안드로이드 .apk) */}
-        <a
-          href="/maeum-app.apk"
-          download="마음이음.apk"
-          className={`mt-3 flex items-center justify-center gap-2 rounded-xl border py-4 text-base font-medium transition focus:outline-none focus:ring-2 ${updateNeeded ? "border-amber-500 bg-amber-500 text-white hover:bg-amber-600 focus:ring-amber-400" : "border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 focus:ring-emerald-400 dark:border-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300 dark:hover:bg-emerald-900/40"}`}
-        >
-          {updateNeeded ? `⬆️ 최신 앱으로 업데이트 (v${LATEST_APP_VERSION})` : `📱 안드로이드 앱 다운로드 (v${LATEST_APP_VERSION})`}
-        </a>
-        <p className="mt-1 text-center text-xs text-zinc-400 dark:text-zinc-500">
-          테스트용 · 안드로이드 전용(.apk)<br />
-          {inApp && (
-            <>현재 버전 {appVersion ? `v${appVersion}` : "확인 불가"}{appVersion && !updateNeeded && <span className="text-emerald-500"> ✓</span>} · </>
-          )}
-          최신 v{LATEST_APP_VERSION}
-        </p>
+        {/* 업데이트 안내 + 앱 받기 버튼 + 버전 줄 — Play 배포 스위치에 따라 APK/Play, 앱 안에선 Play만(AppDownload 주석).
+            앱인지 알기 전(서버 렌더)엔 그리지 않는다 — 앱 웹뷰에 APK 링크가 잠깐이라도 보이지 않게 */}
+        {inApp !== null && <AppDownload updateNeeded={updateNeeded} appVersion={appVersion} inApp={inApp} />}
         <p className="mt-6 text-center text-base text-zinc-600 dark:text-zinc-300">
           계정이 없으신가요?{" "}
           <Link href="/signup" className="font-medium text-[#007bff] dark:text-blue-400">

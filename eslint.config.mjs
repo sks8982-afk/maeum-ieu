@@ -20,6 +20,11 @@ const eslintConfig = defineConfig([
      * (지우지 않는 이유: 당시 무엇을 어떻게 조사했는지가 결함 이력의 근거로 남아 있다)
      */
     "scripts/archive/**",
+    /**
+     * Claude Code 로컬 작업 폴더 — 에이전트가 이 안에 저장소 전체를 복사한 git worktree(.claude/worktrees/)를 만든다.
+     * 린트하면 같은 코드의 경고가 두 번 세져 --max-warnings 게이트가 거짓으로 깨진다(2026-10-07). 저장소 코드가 아니다.
+     */
+    ".claude/**",
   ]),
   {
     /**

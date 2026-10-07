@@ -20,6 +20,12 @@ import path from "path";
 const SAFETY_CRITICAL = [
   "lib/chat/emergency.ts",
   "lib/chat/emergency-notify.ts",
+  // 2026-10-07 7차에 emergency-notify.ts에서 그대로 옮긴 모듈들 — 빠지면 옮긴 코드(SSRF 가드·앱 푸시·운영자 경보)가 래칫 밖으로 조용히 나간다
+  "lib/chat/emergency-notify-shared.ts",
+  "lib/chat/emergency-notify-webhook.ts",
+  "lib/chat/emergency-notify-email.ts",
+  "lib/chat/emergency-notify-app-push.ts",
+  "lib/chat/emergency-notify-alerts.ts",
   "lib/chat/emergency-llm.ts",
   "lib/usage/daily-limit.ts",
   "lib/billing/entitlement.ts",

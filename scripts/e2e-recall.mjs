@@ -9,6 +9,7 @@
  */
 import { chromium } from "playwright";
 import pg from "pg";
+import { pgTlsOptions } from "./db-tls.mjs";
 import fs from "fs";
 import "dotenv/config";
 
@@ -26,9 +27,9 @@ const VARIANTS = [
 ];
 
 function pgPool() {
-  let cs = process.env.DATABASE_URL;
-  try { const u = new URL(cs); u.searchParams.set("sslmode", "no-verify"); cs = u.toString(); } catch {}
-  return new pg.Pool({ connectionString: cs, ssl: { rejectUnauthorized: false } });
+  // TLS는 앱과 같은 정책(scripts/db-tls.mjs → lib/db-tls, 2026-10-07 8차) — 검증을 끄는 건 DATABASE_SSL_NO_VERIFY=1뿐이다
+  const { connectionString, ssl } = pgTlsOptions(process.env.DATABASE_URL);
+  return new pg.Pool({ connectionString, ...(ssl ? { ssl } : {}) });
 }
 async function signupUI(page, email) {
   await page.goto(`${BASE}/signup`, { waitUntil: "domcontentloaded" });

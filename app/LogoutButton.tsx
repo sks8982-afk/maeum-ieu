@@ -1,7 +1,7 @@
 "use client";
 
-import { signOut, useSession } from "next-auth/react";
-import { notifyNativeLogout } from "./RnBridge";
+import { useSession } from "next-auth/react";
+import { LOGOUT_FAILED_ALERT, logoutAndNotifyNative } from "./RnBridge";
 
 /** 문에서 화살표가 나가는 표준 로그아웃 아이콘(SVG — 폰트/이모지 의존 없이 모든 기기에서 렌더). */
 export function LogoutIcon({ className }: { className?: string }) {
@@ -23,7 +23,7 @@ export function LogoutButton({ className, children, title, "aria-label": ariaLab
   return (
     <button
       type="button"
-      onClick={async () => { const uid = session?.user?.id; await signOut({ redirect: false }); notifyNativeLogout(uid); window.location.href = "/login"; }}
+      onClick={() => logoutAndNotifyNative({ userId: session?.user?.id, redirectTo: "/login" }).catch(() => window.alert(LOGOUT_FAILED_ALERT))}
       title={title ?? "로그아웃"}
       aria-label={ariaLabel ?? title ?? "로그아웃"}
       className={className ?? "inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"}

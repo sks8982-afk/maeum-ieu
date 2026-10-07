@@ -17,6 +17,7 @@
 
 import "dotenv/config";
 import { Pool } from "pg";
+import { pgTlsOptions } from "../lib/db-tls";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -26,18 +27,10 @@ if (!DATABASE_URL) {
   process.exit(1);
 }
 
-// AWS RDS: sslmode=no-verify + rejectUnauthorized: false
-let connStr = DATABASE_URL;
-try {
-  const url = new URL(connStr);
-  url.searchParams.set("sslmode", "no-verify");
-  connStr = url.toString();
-} catch { /* URL 파싱 실패 시 그대로 사용 */ }
-
-const pool = new Pool({
-  connectionString: connStr,
-  ssl: { rejectUnauthorized: false },
-});
+// TLS는 앱과 같은 정책(lib/db-tls, 2026-10-07 8차) — RDS면 인증서를 검증하고, 검증을 끄는 건 DATABASE_SSL_NO_VERIFY=1뿐이다
+//   (예전엔 이 스크립트가 인증서 검증을 끈 채 운영 DB에 붙었다)
+const { connectionString, ssl } = pgTlsOptions(DATABASE_URL);
+const pool = new Pool({ connectionString, ...(ssl ? { ssl } : {}) });
 
 // ─── 시스템 프롬프트 (학습 데이터에 포함될 것) ─────────────────────────────
 

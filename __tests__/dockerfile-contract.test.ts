@@ -94,3 +94,30 @@ describe("런타임 — 조용히 깨지는 지점", () => {
     expect(df).toContain(`node:${nvmrc}-`);
   });
 });
+
+/**
+ * 빌드 타임 변수(NEXT_PUBLIC_*)는 이미지 빌드에 **ARG로 받아 ENV로 넘겨야** next build가 본다(2026-10-07).
+ *   목록의 출처는 하나 — scripts/check-env.ts의 BUILD_TIME_VARS(배포 점검이 "재배포해야 바뀐다"고 경고하는 그 목록).
+ *   NEXT_PUBLIC_APP_ON_PLAY를 그 목록에만 넣고 Dockerfile엔 빠뜨려, AWS 이미지에선 --build-arg를 줘도 스위치가 늘 꺼질 뻔했다.
+ */
+describe("빌드 타임 변수 — check-env 목록마다 Dockerfile ARG·ENV", () => {
+  it("BUILD_TIME_VARS의 모든 이름이 빌드(RUN npm run build) 전에 ARG로 받고 같은 이름 ENV로 넘겨진다", async () => {
+    const src = await readFile("scripts/check-env.ts", "utf-8");
+    const list = src.match(/const BUILD_TIME_VARS = \[([^\]]*)\]/)?.[1];
+    expect(list, "scripts/check-env.ts에서 BUILD_TIME_VARS를 찾지 못함").toBeDefined();
+    const vars = [...list!.matchAll(/"([A-Z0-9_]+)"/g)].map((m) => m[1]);
+    // 목록을 못 읽으면 아래 반복이 공허해진다 — 지금 있는 둘은 반드시 읽혀야 한다
+    expect(vars).toEqual(expect.arrayContaining(["NEXT_PUBLIC_SHOW_LIVE_BETA", "NEXT_PUBLIC_APP_ON_PLAY"]));
+    const build = df.indexOf("RUN npm run build");
+    expect(build).toBeGreaterThan(-1);
+    for (const v of vars) {
+      const arg = df.search(new RegExp(`^ARG ${v}=`, "m"));
+      const env = df.search(new RegExp(`^ENV ${v}=\\$\\{${v}\\}`, "m"));
+      // 🔒 ARG가 없으면 --build-arg가 버려지고, ENV가 없거나 빌드 뒤에 있으면 next build가 그 값을 못 본다 —
+      //    둘 다 "배포는 성공, 스위치만 꺼짐"이다
+      expect(arg, `ARG ${v} 없음`).toBeGreaterThan(-1);
+      expect(env, `ENV ${v}=\${${v}} 없음`).toBeGreaterThan(arg);
+      expect(env, `ENV ${v}가 RUN npm run build 뒤에 있음`).toBeLessThan(build);
+    }
+  });
+});

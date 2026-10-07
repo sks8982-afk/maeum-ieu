@@ -51,6 +51,10 @@ COPY . .
 #   그 경계를 강제한다(scripts/check-env.ts).
 ARG NEXT_PUBLIC_SHOW_LIVE_BETA=""
 ENV NEXT_PUBLIC_SHOW_LIVE_BETA=${NEXT_PUBLIC_SHOW_LIVE_BETA}
+# Play 배포 스위치(lib/app-version) — 1.2.0 프로덕션 단계적 출시가 100%가 된 뒤에만 --build-arg NEXT_PUBLIC_APP_ON_PLAY=1.
+#   빠지면 Vercel과 달리 이미지에선 env를 넣어도 늘 꺼진다(로그인 화면 APK 안내·기기 토큰 경고 꺼짐).
+ARG NEXT_PUBLIC_APP_ON_PLAY=""
+ENV NEXT_PUBLIC_APP_ON_PLAY=${NEXT_PUBLIC_APP_ON_PLAY}
 # 어느 리비전이 떠 있는지 /api/health로 확인하기 위한 식별자(시크릿 아님)
 ARG APP_REVISION="unknown"
 ENV APP_REVISION=${APP_REVISION}

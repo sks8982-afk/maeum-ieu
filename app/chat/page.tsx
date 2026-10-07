@@ -1,11 +1,11 @@
 "use client";
 
-import { useSession, signOut } from "next-auth/react";
+import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { BrandLogo, CompanyLogo } from "../BrandLogo";
-import { notifyNativeLogout } from "../RnBridge";
+import { LOGOUT_FAILED_ALERT, logoutAndNotifyNative } from "../RnBridge";
 import { AudioVisualizer } from "./AudioVisualizer";
 import { useWakeWord } from "./useWakeWord";
 import { classifyMedReply } from "@/lib/chat/medication";
@@ -1785,7 +1785,7 @@ export default function ChatPage() {
           </Link>
           <button
             type="button"
-            onClick={async () => { const uid = session?.user?.id; await signOut({ redirect: false }); notifyNativeLogout(uid); window.location.href = "/login"; }}
+            onClick={() => logoutAndNotifyNative({ userId: session?.user?.id, redirectTo: "/login" }).catch(() => window.alert(LOGOUT_FAILED_ALERT))}
             title="로그아웃"
             className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 sm:h-8 sm:w-8 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
           >

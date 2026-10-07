@@ -323,11 +323,35 @@ describe("안전 경로 분리 — 과금이 안전을 막지 않는다", () => 
     expect(plans.BILLING_ENFORCE).toBe(true);
   });
 
+  /**
+   * 위급 알림 경로를 **디렉터리에서 찾아** 검사한다(2026-10-07 8차) — 예전엔 파일 4개를 손으로 적어, emergency-notify를 여러 파일로
+   *   나눈 뒤(7차)에는 옮겨 간 발송·경보 코드(app-push·webhook·email·alerts·shared)와 등록 휴대폰부(lib/push/devices)가 이 검사 밖에
+   *   있었다. 앞으로 또 나눠도 이름 규칙(lib/chat/emergency-notify*.ts)·디렉터리(lib/notify)에 있으면 저절로 들어온다.
+   *   (9차) 범위를 넓혔다 — lib/chat의 응급 모듈 전부(/^emergency.*\.ts$/ — 판정·LLM·최후 안전망·라벨까지, 예전엔 emergency-notify*와
+   *   emergency.ts만), 등록 휴대폰부 디렉터리(lib/push — 예전엔 devices.ts 한 파일), 위급 알림의 기다림 상한(lib/within-ms.ts).
+   */
   it("응급·알림 모듈은 구독을 참조하지 않는다", async () => {
     const fs = await import("node:fs/promises");
-    for (const f of ["lib/chat/emergency.ts", "lib/chat/emergency-notify.ts", "lib/notify/push-fcm.ts", "lib/notify/email.ts"]) {
+    const found = async (dir: string, re: RegExp) => (await fs.readdir(dir)).filter((n) => re.test(n)).map((n) => `${dir}/${n}`);
+    const files = [
+      ...(await found("lib/chat", /^emergency.*\.ts$/)),
+      ...(await found("lib/notify", /\.ts$/)),
+      ...(await found("lib/push", /\.ts$/)),
+      "lib/within-ms.ts",
+    ];
+    // 🔒 찾은 목록이 비거나 줄면 아래 검사가 공허하게 통과한다 — 지금 있는 파일은 반드시 들어 있어야 한다
+    expect(files).toEqual(expect.arrayContaining([
+      "lib/chat/emergency.ts", "lib/chat/emergency-evaluate.ts", "lib/chat/emergency-labels.ts", "lib/chat/emergency-last-resort.ts",
+      "lib/chat/emergency-llm.ts",
+      "lib/chat/emergency-notify.ts", "lib/chat/emergency-notify-shared.ts", "lib/chat/emergency-notify-webhook.ts",
+      "lib/chat/emergency-notify-email.ts", "lib/chat/emergency-notify-app-push.ts", "lib/chat/emergency-notify-alerts.ts",
+      "lib/notify/push-fcm.ts", "lib/notify/email.ts", "lib/notify/fcm-project.ts",
+      "lib/push/devices.ts", "lib/push/app-alert-label.ts",
+      "lib/within-ms.ts",
+    ]));
+    for (const f of files) {
       const s = await fs.readFile(f, "utf-8");
-      expect(s).not.toMatch(/entitlement|subscription|BILLING_ENFORCE/i);
+      expect(s, f).not.toMatch(/entitlement|subscription|BILLING_ENFORCE/i);
     }
   });
 

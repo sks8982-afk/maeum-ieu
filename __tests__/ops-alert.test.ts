@@ -116,3 +116,94 @@ describe("설정·실패에 강건하다", () => {
     await expect(send("제목", ["본문"])).resolves.toBe(false);
   });
 });
+
+/**
+ * 1시간 창은 **보낸** 경보에만(2026-10-07 9차) — 예전엔 보내기 전에 1시간 기록을 남겨, 메일이 실패하거나 호출부의 상한(위급 알림 35초 —
+ *   emergency-notify-alerts OPS_ALERT_TIMEOUT_MS)이 먼저 끝나 아무것도 나가지 않았어도 같은 사유가 1시간 동안 막혔다 — 장애를 알려야 할
+ *   그때 운영자는 아무것도 받지 못했다. 보내는 동안·실패한 뒤에는 60초 바닥만(실패는 실패한 시각부터) — Gmail 장애 동안 응급 턴마다
+ *   다시 보내며 보호자 이메일과 같은 계정의 일일 한도를 태우지 않을 만큼.
+ */
+describe("1시간 창은 보낸 경보에만 — 보내는 중·실패한 뒤에는 60초 바닥(9차)", () => {
+  const SUBJECT = "응급 알림 실패 L3 medical_acute u-1";
+  const textOf = (i: number) => (sendMail.mock.calls[i]?.[0] as { text: string }).text;
+  let err: { mockRestore: () => void };
+  beforeEach(() => {
+    vi.useFakeTimers();
+    err = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => { err.mockRestore(); vi.useRealTimers(); });
+
+  it("첫 발송이 실패하면 60초 안의 같은 사유는 억제, 61초 뒤에는 다시 보낸다 — 그 메일에 억제 건수를 싣는다", async () => {
+    sendMail.mockRejectedValueOnce(new Error("smtp down"));
+    const send = await load();
+    expect(await send(SUBJECT, ["처음"])).toBe(false);
+    vi.advanceTimersByTime(30 * 1000);
+    // 🔒 바닥이 없으면 Gmail 장애 동안 응급 턴마다 다시 보내 보호자 이메일과 같은 계정의 일일 한도를 태운다
+    expect(await send(SUBJECT, ["30초 뒤"])).toBe(false);
+    expect(sendMail).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(31 * 1000);
+    // 🔒 보내지 못한 경보가 1시간을 막으면 장애를 알려야 할 그때 운영자는 아무것도 받지 못한다
+    expect(await send(SUBJECT, ["61초 뒤"])).toBe(true);
+    expect(sendMail).toHaveBeenCalledTimes(2);
+    expect(textOf(1)).toMatch(/같은 사유 1건/);
+  });
+
+  it("바닥은 실패한 시각부터 — 40초 걸려 실패한 뒤 30초엔 아직 억제, 61초 뒤에 다시 보낸다", async () => {
+    sendMail.mockImplementationOnce(() => new Promise((_, reject) => { setTimeout(() => reject(new Error("smtp timeout")), 40_000); }));
+    const send = await load();
+    const first = send(SUBJECT, ["처음"]);
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(await first).toBe(false);
+    vi.advanceTimersByTime(30 * 1000);   // 시작부터 70초 · 실패부터 30초
+    // 🔒 시작부터 재면 느린 실패(SMTP 상한 ~31초) 뒤 곧바로 다시 보낸다
+    expect(await send(SUBJECT, ["실패 30초 뒤"])).toBe(false);
+    vi.advanceTimersByTime(31 * 1000);
+    expect(await send(SUBJECT, ["실패 61초 뒤"])).toBe(true);
+    expect(sendMail).toHaveBeenCalledTimes(2);
+  });
+
+  it("답이 없는 동안은 60초 바닥으로 억제 — 호출부의 35초 상한이 먼저 끝나도 1시간 기록이 남지 않아 61초 뒤 다시 보낸다", async () => {
+    sendMail.mockImplementationOnce(() => new Promise(() => {}));   // 끝내 답하지 않는 SMTP(앞의 DNS 멈춤 등)
+    const send = await load();
+    const { withinMs } = await import("@/lib/within-ms");
+    // 위급 알림의 경보 상한과 같은 감싸기(emergency-notify-alerts sendOpsAlert — withinMs 35초)
+    const bounded = withinMs(send(SUBJECT, ["처음"]), 35_000).catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(10_000);
+    // 🔒 같은 사유가 보내는 중에 몰려도 한 통만
+    expect(await send(SUBJECT, ["보내는 중"])).toBe(false);
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(await bounded).toBeInstanceOf(Error);   // 호출부는 35초에 실패로 쳤다
+    await vi.advanceTimersByTimeAsync(26_000);     // 시작부터 61초
+    // 🔒 끝내 나가지 않은 경보가 1시간을 막으면 그 사이 같은 사유의 경보가 모두 묻힌다
+    expect(await send(SUBJECT, ["61초 뒤"])).toBe(true);
+    expect(sendMail).toHaveBeenCalledTimes(2);
+  });
+
+  it("성공한 경보는 그대로 1시간 — 61초·59분 뒤에도 억제, 61분 뒤에 다시", async () => {
+    const send = await load();
+    expect(await send(SUBJECT, ["처음"])).toBe(true);
+    vi.advanceTimersByTime(61 * 1000);
+    // 🔒 성공도 바닥(60초)만 걸면 장애가 이어지는 동안 1분마다 같은 메일이 간다
+    expect(await send(SUBJECT, ["61초 뒤"])).toBe(false);
+    vi.advanceTimersByTime(58 * 60 * 1000);
+    expect(await send(SUBJECT, ["59분 뒤"])).toBe(false);
+    vi.advanceTimersByTime(2 * 60 * 1000);
+    expect(await send(SUBJECT, ["61분 뒤"])).toBe(true);
+    expect(sendMail).toHaveBeenCalledTimes(2);
+  });
+
+  it("실패한 메일에 실으려던 억제 건수는 다음 메일로 넘어간다 — 규모를 잃지 않는다", async () => {
+    const send = await load();
+    expect(await send(SUBJECT, ["처음"])).toBe(true);   // 1시간 창
+    await send(SUBJECT, ["억제1"]);
+    await send(SUBJECT, ["억제2"]);
+    vi.advanceTimersByTime(61 * 60 * 1000);
+    sendMail.mockRejectedValueOnce(new Error("smtp down"));
+    expect(await send(SUBJECT, ["창 뒤 첫 메일 — 실패"])).toBe(false);
+    expect(textOf(1)).toMatch(/같은 사유 2건/);   // 실으려던 건수
+    vi.advanceTimersByTime(61 * 1000);
+    expect(await send(SUBJECT, ["다시"])).toBe(true);
+    // 🔒 실패와 함께 건수를 버리면 복구 뒤 첫 메일이 1건짜리 사고처럼 보인다
+    expect(textOf(2)).toMatch(/같은 사유 2건/);
+  });
+});

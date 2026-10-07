@@ -12,52 +12,19 @@
  * ⚠ fail-open이 always-open으로 번지는 회귀를 특히 조심한다(케이스 2).
  *   중복 알림은 보호자가 한 번 더 확인하면 끝이지만, 알림 폭주는 신뢰를 잃고
  *   공용 Gmail 발신 한도를 태워 **다른 환자의 알림까지** 끊는다.
+ *
+ * 파일 나눔(2026-10-07 8차 — 2,141줄이라 주제를 찾기 어려웠다. 테스트는 **그대로 옮겼다**):
+ *   · 이 파일 — DB 장애·fail-open·최후 안전망·전 채널 실패 경보·폭주 상한·L2 문구·알림 문구
+ *   · emergency-notify-app-push — 앱 푸시 두 사본·받은 곳 미확인 경보·등록 휴대폰 조회 실패·등록 휴대폰 경로 상한·push_device 테이블 없음
+ *   · emergency-notify-lookups — 보호자 연락처·연결 조회 실패, 진행 중 표시, DB 기다림 상한
+ *   · emergency-notify-send-failures — 채널 동시 출발, 발송 실패(일시 실패면 앵커 없이 60초 바닥 + 경보 — 10차부터 받은 곳이 확인됐어도)
+ *   · emergency-notify-contact-results — 연락처 채널 결과(일시·영구·보낼 곳 없음), 영구 실패 경보, 전 채널 영구 실패의 1시간 창
+ *   공용 목·도우미는 __tests__/helpers/emergency-notify-harness.ts.
  */
-import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
-
-const db = {
-  message: { findFirst: vi.fn(), update: vi.fn() },
-  user: { findUnique: vi.fn() },
-  expertPatient: { findMany: vi.fn() },
-};
-vi.mock("@/lib/prisma", () => ({ prisma: db }));
-
-const pushMock = vi.fn(async () => ({ sent: 1, failed: 0 }));
-const emailMock = vi.fn(async () => true);
-vi.mock("@/lib/notify/push-fcm", () => ({ sendEmergencyPush: (...a: unknown[]) => pushMock(...(a as [])) }));
-const opsAlertMock = vi.fn(async () => true);
-vi.mock("@/lib/notify/email", () => ({
-  sendEmergencyEmail: (...a: unknown[]) => emailMock(...(a as [])),
-  sendOpsAlert: (...a: unknown[]) => opsAlertMock(...(a as [])),
-}));
-vi.mock("@/lib/crypto", () => ({ decryptPII: (s: string) => s, encryptPII: (s: string) => s }));
-
-const P = {
-  userId: "u1", userName: "김응급", level: 3 as const, category: "medical_acute",
-  content: "숨이 안 쉬어져", aiReply: "119에 전화해주세요", createdAt: new Date("2026-10-01T12:00:00Z"),
-};
-
-/**
- * ⚠ 매 호출에 **고유 userId**를 쓴다(2026-10-02 적대 리뷰 지적).
- *   emergency-notify는 모듈 수준 Map(recentSends)으로 fan-out 상한을 거는데, 그 상태는
- *   테스트 간에 리셋되지 않는다. 같은 userId를 재사용하면 두 번째 호출부터 조용히 skip돼
- *   **테스트가 순서에 의존하고, 뒤 테스트가 거짓 통과한다**(실제로 이 파일에서 발생했다).
- *   dedup 자체를 보려는 테스트는 fanoutKey를 명시적으로 고정해 쓴다.
- */
-let notifySeq = 0;
-async function notify(extra: Record<string, unknown> = {}) {
-  const { notifyGuardian } = await import("@/lib/chat/emergency-notify");
-  return notifyGuardian({ ...P, userId: `u-${++notifySeq}`, messageId: "m1", ...extra } as Parameters<typeof notifyGuardian>[0]);
-}
-
-beforeEach(() => {
-  vi.clearAllMocks();
-  // 기본값: 중복 아님 · 보호자 이메일 있음 · 연결 보호자 1명 · 마킹 성공
-  db.message.findFirst.mockResolvedValue(null);
-  db.message.update.mockResolvedValue({});
-  db.user.findUnique.mockResolvedValue({ guardianWebhookUrl: null, guardianEmail: "g@example.com", guardianName: "보호자" });
-  db.expertPatient.findMany.mockResolvedValue([{ expertUserId: "g1" }]);
-});
+import { describe, it, expect, vi } from "vitest";
+import {
+  db, fcmFail, pushMock, emailMock, tokenPushMock, devicesMock, opsAlertMock, P, notify, TOK_READY, device, opsCalls,
+} from "./helpers/emergency-notify-harness";
 
 describe("DB 장애에도 알림은 나간다", () => {
   it("dedup 조회가 실패해도 발송한다 (fail-open)", async () => {
@@ -67,10 +34,12 @@ describe("DB 장애에도 알림은 나간다", () => {
     expect(r.channels.length).toBeGreaterThan(0);
   });
 
-  it("보호자 연락처 조회가 실패해도 FCM은 나간다", async () => {
+  it("보호자 연락처 조회가 실패해도 앱 푸시(등록 휴대폰·토픽)는 나간다", async () => {
     db.user.findUnique.mockRejectedValue(new Error("db down"));
+    devicesMock.mockResolvedValue([device("g1", TOK_READY)]);
     const r = await notify();
-    expect(r.channels).toContain("fcm");
+    expect(r.channels).toEqual(["fcm", "fcm-topic"]);
+    expect(tokenPushMock).toHaveBeenCalledTimes(1);
     expect(pushMock).toHaveBeenCalledTimes(1);
   });
 
@@ -224,6 +193,36 @@ describe("보호자에게 한 건도 못 보내면 운영자에게 알린다", (
     db.expertPatient.findMany.mockResolvedValue([]);
     await expect(notify()).resolves.toMatchObject({ sent: false });
   });
+
+  /**
+   * 경보 제목(2026-10-07 5차) — sendOpsAlert는 **같은 제목**을 1시간에 한 번으로 묶는다. 예전 제목 "응급 알림 실패 (L3 medical_acute)"는
+   *   같은 시간대 다른 어르신의 같은 분류 실패를 삼켰다. 이제 레벨·분류·userId가 들어가고, "알림 대상 없음"(설정 문제)은 제목을
+   *   따로 둔다 — 같은 제목이면 연결·연락처 설정 전의 응급이 1시간 창을 차지해 그 사이 진짜 실패 경보가 억제된다.
+   */
+  it("전 채널 실패 경보 제목에 레벨·분류·userId — '알림 대상 없음'(설정 문제)은 제목이 따로라 실패 경보 자리를 차지하지 않는다", async () => {
+    vi.useFakeTimers();
+    try {
+      db.user.findUnique.mockResolvedValue({ guardianWebhookUrl: null, guardianEmail: null, guardianName: null });
+      db.expertPatient.findMany.mockResolvedValue([]);
+      const { notifyGuardian } = await import("@/lib/chat/emergency-notify");
+      const payload = { ...P, userId: "subject-elder", category: "suicidal", messageId: undefined } as Parameters<typeof notifyGuardian>[0];
+      expect((await notifyGuardian(payload)).reason).toContain("알림 대상 없음");
+      vi.advanceTimersByTime(61 * 1000);
+      // 보호자가 연결됐지만 토픽 사본이 거절됐다 — 진짜 발송 실패
+      db.expertPatient.findMany.mockResolvedValue([{ expertUserId: "g1" }]);
+      pushMock.mockResolvedValue({ sent: 0, failed: 1, failures: [fcmFail("g1", "messaging/internal-error")] });
+      expect((await notifyGuardian(payload)).sent).toBe(false);
+      await notifyGuardian({ ...payload, userId: "subject-elder-2" });
+      await notifyGuardian({ ...payload, level: 2 });
+      // 🔒 제목이 같으면 sendOpsAlert가 뒤 경보를 1시간 동안 억제한다 — 설정 문제·다른 어르신·다른 레벨이 진짜 실패를 삼키면 안 된다
+      expect(opsCalls().map(([s]) => s)).toEqual([
+        "응급 알림 대상 없음 L3 suicidal subject-elder",
+        "응급 알림 실패 L3 suicidal subject-elder",
+        "응급 알림 실패 L3 suicidal subject-elder-2",
+        "응급 알림 실패 L2 suicidal subject-elder",
+      ]);
+    } finally { vi.useRealTimers(); }
+  });
 });
 
 /**
@@ -268,26 +267,44 @@ describe("L2 알림 — 문구·채널이 L3와 구분된다", () => {
     expect(msg.body).toContain("119");
   });
 
-  it("웹훅 본문이 레벨별로 달라진다", async () => {
-    const mod = await import("@/lib/chat/emergency-notify");
-    expect(typeof mod.notifyGuardian).toBe("function");
-    // buildWebhookBody는 비공개 — 웹훅 발송 경로로 간접 검증
-    db.user.findUnique.mockResolvedValue({ guardianWebhookUrl: "https://hook.example.com/x", guardianEmail: null, guardianName: null });
+  /**
+   * 웹훅 본문 — 스텁한 fetch가 **실제로 받은 본문**을 읽어 레벨별 제목과 119 안내 줄을 본다(2026-10-07 6차). 예전 테스트는
+   *   "예외 없이 끝난다"만 봐서, 레벨별 문구가 뒤바뀌거나 웹훅이 아예 안 나가도 통과했다(buildWebhookBody는 비공개 — 발송 경로로 본다).
+   *   AI 응답 원문("119에 전화해주세요")도 본문에 실리므로 119는 **안내 줄**로 가린다.
+   */
+  it("웹훅 본문이 레벨별로 달라진다 — L3 '즉시 응급' 제목 + 119 안내 줄 / L2 '주의' 제목 + 안부 안내(119 안내 없음)", async () => {
+    db.user.findUnique.mockResolvedValue({ name: "김영자", guardianWebhookUrl: "https://hook.example.com/x", guardianEmail: null, guardianName: null });
     db.expertPatient.findMany.mockResolvedValue([]);
-    const fetchSpy = vi.fn(async () => ({ ok: true, status: 200 }) as unknown as Response);
+    const fetchSpy = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async () => new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchSpy);
-    // dns 미목이라 SSRF 가드가 차단할 수 있다 — 호출 여부가 아니라 "예외 없이 끝난다"만 본다
-    await expect(notify({ level: 2 })).resolves.toBeDefined();
-    vi.unstubAllGlobals();
+    try {
+      expect((await notify({ level: 3 })).channels).toEqual(["webhook"]);
+      expect((await notify({ level: 2, category: "dizziness_help" })).channels).toEqual(["webhook"]);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      type Hook = { content: string; text: string; embeds: { title: string; description: string }[] };
+      const [l3, l2] = fetchSpy.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as Hook);
+      const actionLine = (h: Hook) => h.text.split("\n").find((l) => l.startsWith("👉"));
+      // 🔒 L3 — 즉시 응급 제목(본문·임베드 둘 다) + 119 안내
+      expect(l3.embeds[0].title).toBe("[마음이음] 즉시 응급 신호 감지");
+      expect(l3.content.startsWith("**[마음이음] 즉시 응급 신호 감지**\n")).toBe(true);
+      expect(actionLine(l3)).toBe("👉 지금 바로 김영자님께 연락하시거나 119에 신고해주세요.");
+      // 🔒 L2 — 주의 제목 + 안부 안내, 119 신고 안내는 없다(과잉 반응 방지)
+      expect(l2.embeds[0].title).toBe("[마음이음] 주의 신호 감지");
+      expect(l2.content.startsWith("**[마음이음] 주의 신호 감지**\n")).toBe(true);
+      expect(actionLine(l2)).toBe("👉 시간 되실 때 김영자님 안부 확인 부탁드립니다.");
+      expect(l2.text).not.toContain("119에 신고");
+      expect(l2.embeds[0].description).not.toContain("119에 신고");
+    } finally { vi.unstubAllGlobals(); }
   });
 });
 
 describe("방어 분기 — 비정상 입력", () => {
   it("FCM이 0건 성공·일부 실패면 채널로 세지 않는다", async () => {
-    pushMock.mockResolvedValue({ sent: 0, failed: 2 });
+    pushMock.mockResolvedValue({ sent: 0, failed: 1, failures: [fcmFail("g1", "messaging/internal-error")] });
     db.user.findUnique.mockResolvedValue({ guardianWebhookUrl: null, guardianEmail: null, guardianName: null });
     const r = await notify();
-    expect(r.channels).not.toContain("fcm");
+    // 🔒 "fcm만 없으면 된다"가 아니다 — 받아들여진 곳이 없으니 어떤 채널(fcm-topic 포함)도 세면 안 된다(6차: 예전엔 not.toContain("fcm")뿐이라 공허했다)
+    expect(r.channels).toEqual([]);
     expect(r.sent).toBe(false);
   });
 });
@@ -451,7 +468,7 @@ describe("알림 문구 — 실명·한글 분류·감지 시각", () => {
   });
 
   it("FCM 자격증명이 없어 아예 안 보냈으면 로그를 남긴다 — 연결된 보호자가 있는데 조용히 끝나지 않게", async () => {
-    pushMock.mockResolvedValueOnce({ sent: 0, failed: 0, skipped: "FCM not configured" } as never);
+    pushMock.mockResolvedValueOnce({ sent: 0, failed: 0, skipped: "FCM not configured", failures: [] });
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       await notify();

@@ -6,6 +6,7 @@ import "dotenv/config";
 // 함수 내부 지연 require를 정적 import로 올림(2026-10-02 린트 정리).
 //   pg.Pool·fs·os·path는 import만으로 부작용이 없어 로딩 시점 변경이 동작에 영향 없다.
 import { Pool } from "pg";
+import { pgTlsOptions } from "../../lib/db-tls";
 
 const BASE_URL = "http://localhost:3000";
 const CONV_ID = "cmni80oop000704lk3m8ayf3b";
@@ -43,9 +44,9 @@ async function sendMsg(cookie: string, history: { role: string; content: string;
 }
 
 async function checkDb(content: string): Promise<{ level: number | null; evidence: string | null } | null> {
-  let connStr = process.env.DATABASE_URL!;
-  try { const u = new URL(connStr); u.searchParams.set("sslmode", "no-verify"); connStr = u.toString(); } catch {}
-  const pool = new Pool({ connectionString: connStr, ssl: { rejectUnauthorized: false } });
+  // TLS는 앱과 같은 정책(lib/db-tls, 2026-10-07 8차) — RDS면 인증서를 검증하고, 검증을 끄는 건 DATABASE_SSL_NO_VERIFY=1뿐이다
+  const { connectionString, ssl } = pgTlsOptions(process.env.DATABASE_URL!);
+  const pool = new Pool({ connectionString, ...(ssl ? { ssl } : {}) });
   const c = await pool.connect();
   try {
     const r = await c.query(

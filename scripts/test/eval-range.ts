@@ -1,6 +1,7 @@
 /** 특정 메시지 인덱스 범위만 평가 (최근 N 대신 과거 구간 비교용) */
 import "dotenv/config";
 import { Pool } from "pg";
+import { pgTlsOptions } from "../../lib/db-tls";
 interface MsgRow { id: string; role: string; content: string; isAnomaly: boolean | null; analysisNote: string | null; createdAt: Date; }
 
 const ANOMALY_SIGNATURES: { name: string; pattern: RegExp }[] = [
@@ -51,9 +52,9 @@ async function main() {
   const offset = parseInt(process.argv[3] || "60", 10);
   const window = parseInt(process.argv[4] || "60", 10);
 
-  let connStr = process.env.DATABASE_URL!;
-  try { const u = new URL(connStr); u.searchParams.set("sslmode","no-verify"); connStr = u.toString(); } catch {}
-  const pool = new Pool({ connectionString: connStr, ssl: { rejectUnauthorized: false } });
+  // TLS는 앱과 같은 정책(lib/db-tls, 2026-10-07 8차) — RDS면 인증서를 검증하고, 검증을 끄는 건 DATABASE_SSL_NO_VERIFY=1뿐이다
+  const { connectionString, ssl } = pgTlsOptions(process.env.DATABASE_URL!);
+  const pool = new Pool({ connectionString, ...(ssl ? { ssl } : {}) });
   const client = await pool.connect();
   try {
     const r = await client.query(

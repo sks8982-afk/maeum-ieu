@@ -20,6 +20,7 @@
  * 사전: dev 서버(:3100) 실행 중. DATABASE_URL 설정.
  */
 import pg from "pg";
+import { pgTlsOptions } from "./db-tls.mjs";
 import "dotenv/config";
 
 const BASE = process.env.E2E_BASE || "http://localhost:3100";
@@ -35,9 +36,9 @@ const check = (name, ok, detail = "") => {
 };
 
 function pool() {
-  let cs = process.env.DATABASE_URL;
-  try { const u = new URL(cs); u.searchParams.set("sslmode", "no-verify"); cs = u.toString(); } catch { /* 원본 사용 */ }
-  return new pg.Pool({ connectionString: cs, ssl: { rejectUnauthorized: false }, max: 2 });
+  // TLS는 앱과 같은 정책(scripts/db-tls.mjs → lib/db-tls, 2026-10-07 8차) — 검증을 끄는 건 DATABASE_SSL_NO_VERIFY=1뿐이다
+  const { connectionString, ssl } = pgTlsOptions(process.env.DATABASE_URL);
+  return new pg.Pool({ connectionString, ...(ssl ? { ssl } : {}), max: 2 });
 }
 
 /** 쿠키를 들고 다니는 최소 fetch 래퍼 — next-auth 세션 유지용 */

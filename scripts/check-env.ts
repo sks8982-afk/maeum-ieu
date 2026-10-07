@@ -6,6 +6,8 @@
  *             또는 배포 환경에서 직접 실행.
  */
 import "dotenv/config";
+import { describeFlag } from "../lib/flags";
+import { EXPECTED_FCM_PROJECT_ID, expectedFcmProjectId, fcmProjectMismatch } from "../lib/notify/fcm-project";
 
 /**
  * `--build` 모드 — **빌드가 실제로 필요로 하는 것만** 실패 사유로 본다.
@@ -23,7 +25,7 @@ import "dotenv/config";
 const BUILD_MODE = process.argv.includes("--build");
 
 /** 빌드 산출물에 영향을 주는 변수 — 이것만 빌드 실패 사유가 될 수 있다. */
-const BUILD_TIME_VARS = ["NEXT_PUBLIC_SHOW_LIVE_BETA"];
+const BUILD_TIME_VARS = ["NEXT_PUBLIC_SHOW_LIVE_BETA", "NEXT_PUBLIC_APP_ON_PLAY"];
 
 type Sev = "critical" | "important" | "optional";
 interface Check {
@@ -33,6 +35,7 @@ interface Check {
   breaks: string;                       // 없을 때 무슨 일이 나는지
   names: string[];                       // 이 중 하나라도 있으면 present (대체 허용: _B64 등)
   validate?: (v: string) => string | null; // 형식 오류 문자열 또는 null(정상)
+  okNote?: () => string;                 // 정상일 때 OK 줄에 덧붙이는 확인 내용(비밀값 아님)
 }
 
 function jsonFields(v: string, fields: string[]): string | null {
@@ -41,6 +44,20 @@ function jsonFields(v: string, fields: string[]): string | null {
 }
 function b64Json(v: string, fields: string[]): string | null {
   try { return jsonFields(Buffer.from(v, "base64").toString("utf8"), fields); } catch { return "base64 디코드 실패"; }
+}
+
+const SERVICE_ACCOUNT_FIELDS = ["project_id", "private_key", "client_email"];
+
+/**
+ * FCM 서비스 계정 점검 — 필드 + **앱의 Firebase 프로젝트와 같은가**(2026-10-07 7차, lib/notify/fcm-project — 서버와 같은 함수).
+ *   다르면 서버가 FCM을 끈다(보호자 앱 위급 푸시가 하나도 나가지 않는다) — 필수 실패로 센다. 찍는 건 두 프로젝트 id뿐이다(비밀 아님).
+ */
+function fcmServiceAccountProblem(v: string): string | null {
+  const raw = v.trim().startsWith("{");
+  const fieldError = raw ? jsonFields(v, SERVICE_ACCOUNT_FIELDS) : b64Json(v, SERVICE_ACCOUNT_FIELDS);
+  if (fieldError) return fieldError;
+  const mismatch = fcmProjectMismatch(JSON.parse(raw ? v : Buffer.from(v, "base64").toString("utf8")));
+  return mismatch ? `Firebase 프로젝트 불일치 — ${mismatch} → 서버가 FCM을 끈다(보호자 앱 위급 푸시가 나가지 않는다)` : null;
 }
 
 const CHECKS: Check[] = [
@@ -71,7 +88,7 @@ const CHECKS: Check[] = [
     validate: v => /^https:\/\//.test(v) ? null : "https:// 로 시작해야 함 — http면 세션 쿠키 Secure 플래그가 꺼진다" },
   // ── 위급 알림(현장 테스트 핵심) ──
   { label: "FCM_SERVICE_ACCOUNT(_B64)", sev: "critical", feature: "보호자 앱 푸시", breaks: "앱 위급 알림이 조용히 skip됨", names: ["FCM_SERVICE_ACCOUNT_B64", "FCM_SERVICE_ACCOUNT"],
-    validate: v => (v.trim().startsWith("{") ? jsonFields(v, ["project_id", "private_key", "client_email"]) : b64Json(v, ["project_id", "private_key", "client_email"])) },
+    validate: fcmServiceAccountProblem, okNote: () => `Firebase 프로젝트 일치: ${expectedFcmProjectId()}` },
   { label: "ENCRYPTION_KEY", sev: "critical", feature: "연락처 PII·목소리 특징값(성문) 암/복호화", breaks: "보호자 이메일/전화 복호화 불가 → 이메일 알림 실패, PII 평문 저장. 목소리 등록은 저장 거부(평문 금지)·기존 성문 대조 불가",
     names: ["ENCRYPTION_KEY"], validate: v => /^[0-9a-fA-F]{64}$/.test(v) ? null : (v.length >= 16 ? "hex64 아님 → 패스프레이즈로 SHA-256 파생됨(정상이나 ⚠️바뀌면 기존 데이터 복호화 불가)" : "너무 짧음") },
   { label: "GMAIL_USER + GMAIL_APP_PASSWORD", sev: "important", feature: "이메일 위급 알림", breaks: "이메일 채널 미동작(앱푸시/webhook은 별개)", names: ["GMAIL_USER"],
@@ -123,6 +140,8 @@ const EFFECTIVE: { label: string; name: string; fallback: string; note: string }
   { label: "프롬프트 캐시", name: "PROMPT_CACHE", fallback: "off(1일 때만 on)", note: "멀티 인스턴스에서 핸들이 인스턴스별" },
   { label: "C2 악화 알림", name: "C2_NOTIFY", fallback: "off", note: "" },
   { label: "Live 베타 노출", name: "NEXT_PUBLIC_SHOW_LIVE_BETA", fallback: "off", note: "⚠ 빌드 타임에 번들에 박힌다 — 런타임 주입으로는 바뀌지 않는다" },
+  { label: "Play 배포 안내", name: "NEXT_PUBLIC_APP_ON_PLAY", fallback: "off(웹 APK 1.0.3 안내)", note: "⚠ 빌드 타임 — 1.2.0 프로덕션 단계적 출시가 100%가 된 뒤 1로 켜고 재배포" },
+  { label: "FCM 기대 프로젝트", name: "FCM_PROJECT_ID", fallback: EXPECTED_FCM_PROJECT_ID, note: "서비스 계정의 project_id가 이와 다르면 서버가 FCM을 끈다(앱 google-services.json 기준)" },
 ];
 
 const icon = { ok: "✅", miss: "❌", warn: "⚠️ " };
@@ -143,7 +162,7 @@ for (const c of CHECKS) {
   const err = c.validate ? c.validate(val) : null;
   if (err && (err.startsWith("hex64") || err.startsWith("권장"))) console.log(`${icon.warn}${sevTag[c.sev]}  ${c.label} — 있음 (${err})`);
   else if (err) { console.log(`${icon.warn}${sevTag[c.sev]}  ${c.label} — 있으나 형식 이상: ${err}`); if (c.sev === "critical") criticalMissing++; }
-  else console.log(`${icon.ok} ${sevTag[c.sev]}  ${c.label} — OK (${c.feature})`);
+  else console.log(`${icon.ok} ${sevTag[c.sev]}  ${c.label} — OK (${c.feature}${c.okNote ? ` · ${c.okNote()}` : ""})`);
 }
 
 // ── 실효값 (없어도 동작하지만 무엇으로 도는지 보여야 하는 것) ──
@@ -151,12 +170,21 @@ console.log(`
 ===== 실효 설정값 =====`);
 for (const e of EFFECTIVE) {
   const v = process.env[e.name]?.trim();
-  const shown = v && v.length > 0 ? v : `(기본) ${e.fallback}`;
+  // 빌드 타임 스위치는 값이 아니라 **코드가 보는 켜짐/꺼짐**을 찍는다(lib/flags — 코드와 같은 함수, 2026-10-07 4차).
+  //   값을 그대로 찍으면 "true"·" 1"이 켜진 것처럼 보이는데 코드는 꺼짐으로 빌드한다.
+  const shown = BUILD_TIME_VARS.includes(e.name)
+    ? describeFlag(e.name, process.env[e.name]).state
+    : v && v.length > 0 ? v : `(기본) ${e.fallback}`;
   console.log(`   ${e.label.padEnd(22, " ")} ${shown}${e.note ? `   — ${e.note}` : ""}`);
 }
 
 // 주의 플래그
 console.log("");
+// 스위치를 넣었는데 정확히 "1"이 아니면 꺼짐으로 빌드된다 — 넣은 사람은 켰다고 믿는다
+for (const n of BUILD_TIME_VARS) {
+  const { warning } = describeFlag(n, process.env[n]);
+  if (warning) console.log(`${icon.warn}주의: ${warning}`);
+}
 if (process.env.DATABASE_SSL_NO_VERIFY === "1")
   console.log(`${icon.warn}주의: DATABASE_SSL_NO_VERIFY=1 — RDS TLS 인증서 검증이 꺼진다(중간자 위험). 건강 민감정보 DB이므로 프로덕션에서 반드시 제거.`);
 // Upstash 미설정 = 레이트리밋이 **조용히** 인메모리 폴백으로 내려간다 — 멀티 인스턴스에서 한도가 N배가 된다.
@@ -172,8 +200,8 @@ if (BUILD_MODE) {
   // 빌드 모드: 번들에 인라인되는 값만 실패 사유. 런타임 시크릿은 참고로만 보고한다.
   console.log(`\n[--build] 빌드 게이트 — 번들에 박히는 값만 검사합니다.`);
   for (const n of BUILD_TIME_VARS) {
-    const v = process.env[n]?.trim();
-    console.log(`   ${n} = ${v && v.length ? v : "(미설정 → off로 빌드됨)"}`);
+    // 코드와 같은 판정(lib/flags flagOn)으로 on/off — 값만 찍으면 "true"가 켜진 것처럼 보인다
+    console.log(`   ${n} = ${describeFlag(n, process.env[n]).state}`);
   }
   console.log(`   ※ 위 값은 **빌드 시점에 번들에 고정**된다 — 런타임 env로는 바꿀 수 없다.`);
   console.log(`   ※ 런타임 시크릿(DATABASE_URL·ENCRYPTION_KEY 등)은 여기서 실패 사유가 아니다.`);

@@ -7,6 +7,8 @@ import { useEffect, useState } from "react";
 import { ThemeToggle } from "../theme-toggle";
 import { LogoutButton } from "../LogoutButton";
 import MedicationEditor from "../components/MedicationEditor";
+import { appAlertLabel, type AppAlertState } from "@/lib/push/app-alert-label";
+import { flagOn } from "@/lib/flags";
 
 interface Profile {
   id: string;
@@ -52,7 +54,8 @@ export default function MyPage() {
   const [expertCodeInput, setExpertCodeInput] = useState("");
   const [linkingExpert, setLinkingExpert] = useState(false);
   const [expertLinkMsg, setExpertLinkMsg] = useState("");
-  const [linkedExperts, setLinkedExperts] = useState<{ expertUserId: string; name: string }[]>([]);
+  // appAlert: 그분이 휴대폰 앱으로 위급 알림을 받을 수 있는지(상태만 — 휴대폰 대수·기기 정보는 없다, app/api/users/linked-experts). 조회 실패면 null
+  const [linkedExperts, setLinkedExperts] = useState<{ expertUserId: string; name: string; appAlert?: AppAlertState | null }[]>([]);
   const [accessLogs, setAccessLogs] = useState<{ expertName: string; action: string; at: string }[]>([]);
   const [showAccessLogs, setShowAccessLogs] = useState(false);
 
@@ -272,7 +275,7 @@ export default function MyPage() {
                 </Link>
               )}
               {/* 라이브 음성 대화(베타) — 헤더에서 설정으로 통합(2026-09-08). 어르신 계정 + 노출 플래그일 때만 */}
-              {screeningMode === "user" && process.env.NEXT_PUBLIC_SHOW_LIVE_BETA === "1" && (
+              {screeningMode === "user" && flagOn(process.env.NEXT_PUBLIC_SHOW_LIVE_BETA) && (
                 <Link href="/live" className="mt-2 block rounded-xl border border-violet-300 bg-violet-50 px-3 py-2 text-center text-sm font-semibold text-violet-700 hover:bg-violet-100 dark:border-violet-700 dark:bg-violet-900/30 dark:text-violet-300">
                   🎙 라이브 음성 대화 (베타) →
                 </Link>
@@ -311,12 +314,28 @@ export default function MyPage() {
               <p className="mt-1 text-[11px] text-zinc-400">연결하면 보호자·전문가가 인지 등급·추세 요약만 볼 수 있어요. 어르신 본인에게는 결과가 보이지 않고, 대화 내용도 공개되지 않아요.</p>
               {linkedExperts.length > 0 && (
                 <div className="mt-2 space-y-1">
-                  {linkedExperts.map((e) => (
-                    <div key={e.expertUserId} className="flex items-center justify-between rounded-lg bg-zinc-50 px-3 py-1.5 text-xs dark:bg-zinc-800">
-                      <span className="text-zinc-700 dark:text-zinc-200">🩺 {e.name}님과 연결됨</span>
-                      <button type="button" onClick={() => unlinkExpert(e.expertUserId)} className="text-red-500 hover:underline">연결 해제</button>
-                    </div>
-                  ))}
+                  {linkedExperts.map((e) => {
+                    // 2026-10-07: 연결만 하고 앱에 로그인하지 않은 분도 알림을 받는 것처럼 보였다 — 받는지 표시.
+                    //   0대("미등록")는 Play 배포 스위치를 켠 뒤(1.2.0 프로덕션 단계적 출시가 100%가 된 뒤)에만 경고한다 — 그 전엔 1.0.3이
+                    //   토픽으로 받는 게 정상이다(appAlertLabel)
+                    const label = e.appAlert ? appAlertLabel(e.appAlert) : null;
+                    return (
+                      <div key={e.expertUserId} className="flex items-center justify-between rounded-lg bg-zinc-50 px-3 py-1.5 text-xs dark:bg-zinc-800">
+                        <span className="flex flex-col">
+                          <span className="text-zinc-700 dark:text-zinc-200">🩺 {e.name}님과 연결됨</span>
+                          {label && (
+                            <span className={label.warn ? "text-[11px] text-amber-700 dark:text-amber-300" : "text-[11px] text-teal-700 dark:text-teal-300"}>
+                              {label.text}
+                            </span>
+                          )}
+                        </span>
+                        <button type="button" onClick={() => unlinkExpert(e.expertUserId)} className="text-red-500 hover:underline">연결 해제</button>
+                      </div>
+                    );
+                  })}
+                  {linkedExperts.some((e) => e.appAlert && appAlertLabel(e.appAlert)?.warn) && (
+                    <p className="text-[11px] text-zinc-400">⚠ 표시된 분은 휴대폰으로 위급 알림을 못 받을 수 있어요 — 그분이 안드로이드 마음이음 앱(최신 버전)에 그 계정으로 로그인하고 알림을 허용해야 해요.</p>
+                  )}
                 </div>
               )}
 

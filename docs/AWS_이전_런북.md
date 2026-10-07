@@ -112,6 +112,11 @@ npm run check:env:deploy    # 실제 런타임 환경에서 실행 — 빌드 �
 - **`DATABASE_SSL_NO_VERIFY`는 옮기지 말 것** — Vercel env에 남아 있으면 삭제.
   `lib/rds-ca.ts`가 들어온 뒤로 불필요하며, 두면 건강 DB의 TLS 검증이 꺼진다.
 - `NEXT_PUBLIC_SHOW_LIVE_BETA`는 **빌드 인자**다(`--build-arg`). 런타임 env로는 안 바뀐다.
+- `NEXT_PUBLIC_APP_ON_PLAY`도 **빌드 인자**다(`--build-arg NEXT_PUBLIC_APP_ON_PLAY=1`). 런타임 env로는 안 바뀐다.
+  **1.2.0 프로덕션 단계적 출시가 100%가 된 뒤에만** 켜고 다시 빌드한다("공개"됐다는 것만으로는 아니다 — 단계적 출시 중엔 일부 사용자만
+  1.2.0을 받는다. `docs/playstore/README_출시가이드.md` 8절) — 켜면 로그인 화면의 앱 받기가 웹 APK(1.0.3)에서 Play로
+  바뀌고, 보호자 화면·운영자 경보가 "등록 휴대폰 0대"를 경고하기 시작한다(`lib/app-version.ts`). 먼저 켜면 1.0.3 보호자에게
+  받을 수 없는 업데이트를 안내하고, 토픽으로 잘 받는 보호자까지 "휴대폰 없음"으로 보인다. Vercel에서 이미 켰다면 이미지에도 넘길 것.
 - **`GMAIL_USER` + `GMAIL_APP_PASSWORD`** — 보호자 응급 **이메일**과 운영자 경보를 보내는 Gmail. ⚠ 2026-10-06 확인:
   **현재 Vercel에 이 둘이 없다**(로컬 `.env`에만 있다) → 배포 환경에선 이메일 채널이 꺼져 있다(푸시는 FCM으로 동작).
   AWS로 옮길 때 반드시 넣을 것. 앱 비밀번호가 만료됐으면 Google 계정에서 재발급.

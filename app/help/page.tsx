@@ -14,6 +14,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { normalizeMode, type ScreeningMode } from "@/lib/roles";
+import { flagOn } from "@/lib/flags";
 import { COMPANION_DEFAULTS } from "@/lib/chat/constants";
 import { hasJongseong } from "@/lib/chat/korean-particle";
 
@@ -203,7 +204,7 @@ export default async function HelpPage() {
 
         {elder && (
           // 홈과 같은 동선 — 라이브 베타가 켜진 환경에선 /live로 바로 간다(중간 선택화면 스킵)
-          <Link href={process.env.NEXT_PUBLIC_SHOW_LIVE_BETA === "1" ? "/live?start=1" : "/chat?start=1"} className="mt-6 flex items-center justify-center gap-2 rounded-2xl bg-[#007bff] px-6 py-5 text-xl font-bold text-white shadow-lg transition hover:bg-[#0069d9]">
+          <Link href={flagOn(process.env.NEXT_PUBLIC_SHOW_LIVE_BETA) ? "/live?start=1" : "/chat?start=1"} className="mt-6 flex items-center justify-center gap-2 rounded-2xl bg-[#007bff] px-6 py-5 text-xl font-bold text-white shadow-lg transition hover:bg-[#0069d9]">
             💬 지금 대화하기
           </Link>
         )}

@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { signOut, useSession } from "next-auth/react";
-import { notifyNativeLogout } from "../RnBridge";
+import { useSession } from "next-auth/react";
+import { LOGOUT_FAILED_ALERT, logoutAndNotifyNative } from "../RnBridge";
 
 export default function ConsentPage() {
   // 일반인(general)은 인지 선별 대상이 아니라 마음 건강 자가점검만 한다 —
@@ -97,7 +97,7 @@ export default function ConsentPage() {
 
         <button
           type="button"
-          onClick={async () => { const uid = session?.user?.id; await signOut({ callbackUrl: "/login" }); notifyNativeLogout(uid); }}
+          onClick={() => logoutAndNotifyNative({ userId: session?.user?.id, redirectTo: "/login" }).catch(() => window.alert(LOGOUT_FAILED_ALERT))}
           className="mt-3 w-full text-center text-sm text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
         >
           동의하지 않고 나가기(로그아웃)

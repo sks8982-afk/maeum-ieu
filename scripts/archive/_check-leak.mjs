@@ -1,11 +1,12 @@
 // 한 STAMP의 전체 사이클 계정 집계: 빈응답/영어누출/민지누출 (읽기 전용, DB=ground truth)
 // 사용: node scripts/_check-leak.mjs <stampLike>   예: 534164
 import pg from "pg";
+import { pgTlsOptions } from "../db-tls.mjs";
 import "dotenv/config";
 const STAMP = process.argv[2] || "";
-let cs = process.env.DATABASE_URL;
-try { const u = new URL(cs); u.searchParams.set("sslmode", "no-verify"); cs = u.toString(); } catch {}
-const p = new pg.Pool({ connectionString: cs, ssl: { rejectUnauthorized: false } });
+// TLS는 앱과 같은 정책(scripts/db-tls.mjs → lib/db-tls, 2026-10-07 8차) — 검증을 끄는 건 DATABASE_SSL_NO_VERIFY=1뿐이다
+const { connectionString, ssl } = pgTlsOptions(process.env.DATABASE_URL);
+const p = new pg.Pool({ connectionString, ...(ssl ? { ssl } : {}) });
 const c = await p.connect();
 const rows = await c.query(
   `SELECT u.email, u."companionName" comp, m.content
