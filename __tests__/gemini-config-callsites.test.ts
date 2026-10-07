@@ -13,11 +13,15 @@
  *   객체는 모양만 본다(expect.any / objectContaining).
  *   예외 1곳(의도한 변경): 정신건강 분류 maxOutputTokens 64→256 — 그 테스트의 주석 참고.
  * thinking 여유 불변식: 테스트마다 붙잡은 요청 **전부**(오늘 세대 모델)가 maxOutputTokens ≥ thinkingBudget + 128
- *   (또는 상한 없음)인지 afterEach가 본다 — 아래 headroomViolations 주석 참고.
+ *   (또는 상한 없음)인지 afterEach가 본다 — 검사기·128은 __tests__/helpers/gemini-headroom(app 라우트 테스트와 공용).
+ *   소스 계약(gemini-config-contract '오늘 세대 thinking 여유')은 헬퍼 결과가 펼쳐진 config 리터럴만 읽는다 — 그
+ *   config를 다시 펼쳐 상한을 덮어쓰는 래퍼(getTextModel의 withTimeout 등)나 env 예산(COMPANION_THINKING_BUDGET)은
+ *   소스로 못 따라간다. 여기선 SDK 경계에서 받은 값을 그대로 본다.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { headroomViolations, type CapturedRequest } from "@/__tests__/helpers/gemini-headroom";
 
-type Req = { model: string; config: Record<string, unknown> };
+type Req = CapturedRequest;
 const calls: Req[] = [];
 let replyText = "{}";
 
@@ -56,7 +60,6 @@ const { summarizeMessages, rollupSummaries } = await import("@/lib/chat/summariz
 const { extractWithLLM } = await import("@/lib/chat/profile-extractor-llm");
 const { classifyAnswer } = await import("@/lib/health/mental-scorer");
 const { scoreDomainAnswer } = await import("@/lib/screening/exam-runner");
-const { acceptsLegacyTuning } = await import("@/lib/ai/gemini-config");
 
 const SAFETY = COMPANION_SAFETY_SETTINGS;
 const SIGNAL = expect.any(AbortSignal);
@@ -67,25 +70,6 @@ const CLEAN_ANALYSIS = JSON.stringify({ isAnomaly: false, analysisNote: "", cogn
 function expectCalls(n: number): Req[] {
   expect(calls.length, `Gemini 호출 횟수 (${calls.map((c) => c.model).join(", ")})`).toBe(n);
   return calls;
-}
-
-/**
- * 오늘 세대 thinking 여유 — SDK에 실제로 간 요청마다 maxOutputTokens가 없거나(모델 기본 상한) ≥ thinkingBudget + 128.
- *   maxOutputTokens는 thinking을 포함한다 — 모자라면 예산만큼 생각하다 상한에 닿아 답(JSON)이 잘린다.
- *   소스 계약(gemini-config-contract '오늘 세대 thinking 여유')은 헬퍼 결과가 펼쳐진 config 리터럴만 읽는다 — 그 config를
- *   다시 펼쳐 상한을 덮어쓰는 래퍼(getTextModel의 withTimeout 등)나 env 예산(COMPANION_THINKING_BUDGET)은 소스로 못
- *   따라간다. 여기선 SDK 경계에서 받은 값을 그대로 본다. 새 모델(thinkingLevel)엔 토큰 예산이 없어 대상이 아니다.
- *   128은 gemini-config-contract의 MIN_OUTPUT_HEADROOM과 같다 — 바꾸면 둘 다 바꿀 것.
- */
-const MIN_OUTPUT_HEADROOM = 128;
-function headroomViolations(reqs: Req[]): string[] {
-  return reqs.filter((r) => acceptsLegacyTuning(r.model)).flatMap((r) => {
-    const max = r.config.maxOutputTokens;
-    const budget = (r.config.thinkingConfig as { thinkingBudget?: unknown } | undefined)?.thinkingBudget;
-    const ok = max === undefined
-      || (typeof max === "number" && typeof budget === "number" && max >= budget + MIN_OUTPUT_HEADROOM);
-    return ok ? [] : [`${r.model} thinkingBudget=${JSON.stringify(budget)} maxOutputTokens=${JSON.stringify(max)}`];
-  });
 }
 
 beforeEach(() => {
@@ -100,25 +84,29 @@ afterEach(() => {
 });
 
 describe("thinking 여유 검사기 — 공허하지 않다", () => {
-  it("상한 < 예산+128·예산 없는 상한·숫자 아닌 상한은 잡고, 경계·상한 없음·새 모델은 통과", () => {
+  it("상한 < 예산+128·예산 없는 상한·음수 예산·숫자 아닌 상한은 잡고, 경계·상한 없음·새 모델은 통과", () => {
     const req = (model: string, config: Record<string, unknown>): Req => ({ model, config });
     expect(headroomViolations([
       req("gemini-2.5-flash", { maxOutputTokens: 64, thinkingConfig: { thinkingBudget: 64 } }),
       req("gemini-2.5-flash", { maxOutputTokens: 192, thinkingConfig: { thinkingBudget: 64 } }),
       req("gemini-3.8-flash", { maxOutputTokens: 1024 }),
+      req("gemini-2.5-flash", { maxOutputTokens: 2048, thinkingConfig: { thinkingBudget: -1 } }),
+      req("gemini-2.5-flash", { maxOutputTokens: 128, thinkingConfig: { thinkingBudget: 0 } }),
       req("gemini-2.5-flash", { maxOutputTokens: "256", thinkingConfig: { thinkingBudget: 64 } }),
       req("gemini-2.5-flash", { thinkingConfig: { thinkingBudget: 512 } }),
       req("gemini-4-flash", { maxOutputTokens: 64, thinkingConfig: { thinkingLevel: "LOW" } }),
     ])).toEqual([
       "gemini-2.5-flash thinkingBudget=64 maxOutputTokens=64",
       "gemini-3.8-flash thinkingBudget=undefined maxOutputTokens=1024",
+      // -1 = 동적 thinking(2.5) — 상한 안에서 얼마나 생각할지 정해지지 않는다. 숫자 비교만 하면 2048 ≥ 127로 녹색이었다
+      "gemini-2.5-flash thinkingBudget=-1 maxOutputTokens=2048",
       "gemini-2.5-flash thinkingBudget=64 maxOutputTokens=\"256\"",
     ]);
   });
 });
 
 describe("동반자 getTextModel — HEAD 그대로", () => {
-  // thinkingBudget 512 = COMPANION_THINKING_BUDGET 기본값. gemini-config-contract의 ENV_BUDGET_DEFAULT가 이 값을
+  // thinkingBudget 512 = COMPANION_THINKING_BUDGET 기본값. gemini-config-contract의 ENV_BUDGET이 이 값을
   //   빌려 thinking 여유 불변식을 본다(env 예산은 소스에서 못 읽는다) — 기본값을 바꾸면 둘 다 바꿀 것.
   const base = {
     temperature: 0.7, maxOutputTokens: 2048, thinkingConfig: { thinkingBudget: 512 },

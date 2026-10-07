@@ -11,15 +11,21 @@
  * 같은 구문 트리로 헬퍼 호출부가 적은 **새 모델용 thinkingLevel 리터럴**도 고정한다(텍스트 경로 low · Live null) —
  *   단위 테스트의 호출부 표는 사본이라, 실제 호출부가 바뀌어도 녹색이었다.
  * 그리고 오늘 세대에 싣는 예산의 여유 불변식: maxOutputTokens ≥ thinkingBudget + 128(라우팅된 호출부 전부).
- *   상한·예산을 정할 수 있는 꼴 중 숫자 리터럴로 확인되지 않는 것(축약형·계산된 키·다른 펼침·숫자 아닌 값)은
+ *   상한·예산을 정할 수 있는 꼴 중 숫자로 확인되지 않는 것(축약형·계산된 키·다른 펼침·숫자 아닌 값·-1 같은 식)은
  *   원문을 드러내며 실패한다 — '상한 없음'은 상한이 어떤 꼴로도 없고 헬퍼 결과 말고는 펼침도 없을 때뿐이다.
- *   config를 다시 펼치는 래퍼(getTextModel 등)의 덮어쓰기는 소스로 못 따라간다 — gemini-config-callsites가
- *   SDK에 실제로 간 요청에서 같은 불변식을 본다.
+ *   닫힘: app/·lib/의 maxOutputTokens는 **전부** 그렇게 검증된 행이어야 한다 — config를 다시 펼쳐 덮어쓰거나
+ *   (`{ ...cfg, maxOutputTokens: 128 }`) 사후 대입·Object.assign으로 고치는 곳은 행이 아니라서 위반으로 드러난다.
+ *   래퍼(getTextModel 등)·env 예산처럼 소스로 못 따라가는 값은 SDK 경계의 실요청으로 본다 — gemini-config-callsites
+ *   (lib)·chat-stt-tuning·observe-turn-gates·live-token-gates(app 라우트). 검사기와 128은 helpers/gemini-headroom 하나다.
+ * 요청 지점 인벤토리: app/·lib/의 SDK 요청(models.generateContent·generateContentStream·authTokens.create·live.connect)은
+ *   라우팅된 파일과 허용 목록(이유를 적은 2곳)에만 있다. 헬퍼는 import로 확인한다 — 별칭·네임스페이스 import면
+ *   스캐너가 호출을 못 알아보므로(금지 키·수준·여유 검사를 건너뛴다) 그 자체가 위반이다.
  */
 import { describe, it, expect } from "vitest";
 import ts from "typescript";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { MIN_OUTPUT_HEADROOM } from "@/__tests__/helpers/gemini-headroom";
 
 const ROOTS = ["app", "lib"];
 const HELPER_FILE = "lib/ai/gemini-config.ts";
@@ -45,6 +51,40 @@ const ROUTED_FILES: Record<string, number> = {
   "lib/screening/exam-runner.ts": 1,
 };
 
+/** 헬퍼 모듈(저장소 상대·확장자 없음) — 각 파일의 import 경로를 이것으로 풀어 헬퍼인지 본다 */
+const HELPER_MODULE = HELPER_FILE.replace(/\.ts$/, "");
+/** SDK 요청을 내는 호출 — 호출식 끝의 `<소유>.<메서드>`(ai.models.generateContent·getGenAI().models.generateContent 등) */
+const REQUEST_CALLS = new Set(["models.generateContent", "models.generateContentStream", "authTokens.create", "live.connect"]);
+/**
+ * 라우팅된 파일의 SDK 요청 지점 수 — 키는 ROUTED_FILES와 같다(아래 인벤토리 테스트가 고정). 헬퍼 호출 수와는 다를 수
+ *   있다: 동반자는 헬퍼 결과 하나를 generateContent·generateContentStream 두 요청에 싣는다.
+ */
+const ROUTED_REQUEST_SITES: Record<string, number> = {
+  "app/api/chat/route.ts": 1,
+  "app/api/observe/turn/route.ts": 1,
+  "app/api/live/token/route.ts": 1,
+  "lib/chat/llm.ts": 2,
+  "lib/chat/cognitive-analyzer.ts": 1,
+  "lib/chat/emergency-llm.ts": 1,
+  "lib/chat/summarizer.ts": 2,
+  "lib/chat/profile-extractor-llm.ts": 1,
+  "lib/health/mental-scorer.ts": 1,
+  "lib/screening/exam-runner.ts": 1,
+};
+/**
+ * 헬퍼 없이 요청하는 파일 — "이 요청엔 모델 세대별로 갈라야 할 필드가 없다"는 판단과 그 이유. 여기 올라 있어도
+ *   샘플링·thinking 키를 싣는 순간 금지 키 스캔이, maxOutputTokens를 싣는 순간 닫힘 검사가 잡는다.
+ */
+const REQUEST_ALLOWLIST: Record<string, number> = {
+  // Gemini TTS(Cloud TTS 실패 시 폴백): config가 responseModalities·speechConfig뿐이다 — 새 세대가 400으로 거부할
+  //   샘플링·thinking 필드도, thinking과 나눠 쓸 maxOutputTokens도 없다(오디오 출력). 모델은 TTS 전용 목록(GEMINI_TTS_MODELS).
+  "app/api/tts/route.ts": 1,
+  // Live 브라우저 연결(ai.live.connect): 서버가 발급한 토큰으로 붙고 model·callbacks만 넘긴다. 세션 config(thinking 포함)는
+  //   토큰의 liveConnectConstraints에 서버가 박아 두고 — 그 발급(app/api/live/token)이 헬퍼로 라우팅돼 있다 — 제약 연결에선
+  //   클라 config가 무시된다(2026-06-12 전사 미수신으로 실증, live-voice.ts 주석).
+  "app/chat/live-voice.ts": 1,
+};
+
 /**
  * 새 모델용 thinkingLevel — 호출부가 헬퍼 두 번째 인자에 **리터럴로** 적는 값(헬퍼 헤더 매핑표). 타입은 넷 다
  *   허용하므로 tsc는 못 막는다. 실패를 삼키는 텍스트 경로는 전부 "low"(3.7/3.8 Flash가 minimal을 400으로 거부 →
@@ -54,19 +94,15 @@ const LIVE_ROUTE = "app/api/live/token/route.ts";
 const expectedLevel = (file: string): string | null => (file === LIVE_ROUTE ? null : "low");
 
 /**
- * 오늘 세대(≤3.8)의 thinking 여유 — maxOutputTokens는 thinking 토큰을 **포함**한다(문서 "including thought
- *   tokens"). 예산만큼 생각하고도 답(JSON)을 끝까지 쓸 몫이 남아야 한다. 정신건강 분류가 64/64로 보내다가
- *   2026-10-07 실측에서 LLM 경로 답 7개 중 5개를 잘린 JSON으로 잃었다(-1 → 재질문).
- *   새 모델(thinkingLevel)엔 토큰 예산이 없어 이 불변식이 닿지 않는다 — 헬퍼 헤더 '불확실한 것' 참고.
+ * 예산을 env로 정하는 호출부 — 그 파일에서 env로 정한 **식별자 하나만** 기본값으로 읽는다(소스에서 값을 읽을 수 없다).
+ *   다른 식별자·식은 원문으로 남아 위반이 된다 — 예전엔 파일 단위로 기본값을 끼워 넣어 `thinkingBudget: -1`(2.5의 동적
+ *   thinking — 상한 안에서 얼마나 생각할지 정해지지 않는다)도 512로 읽혀 녹색이었다. 기본값 512는 실요청 캡처
+ *   (gemini-config-callsites '동반자 getTextModel')가 고정한다 — 바꾸면 둘 다. env로 1921 이상을 줘도 llm.ts가
+ *   1920(상한 2048 − 128)에서 자른다 — 그 천장은 소스로 못 읽어 gemini-config-callsites가 "5000" → 1920으로 고정한다.
  */
-const MIN_OUTPUT_HEADROOM = 128;
-/**
- * 예산을 env로 정하는 호출부 — 소스에서 값을 읽을 수 없어 기본값을 적는다. 이 기본값은 실요청 캡처
- *   (gemini-config-callsites '동반자 getTextModel': thinkingBudget 512)가 고정한다 — 바꾸면 둘 다 바꿀 것.
- *   env(COMPANION_THINKING_BUDGET)로 1921 이상을 줘도 llm.ts가 1920(상한 2048 − 128)에서 자른다 — 그 상한은
- *   소스로 못 읽어서 gemini-config-callsites가 "5000" → 1920을 실요청으로 고정한다.
- */
-const ENV_BUDGET_DEFAULT: Record<string, number> = { "lib/chat/llm.ts": 512 };
+const ENV_BUDGET: Record<string, { identifier: string; defaultValue: number }> = {
+  "lib/chat/llm.ts": { identifier: "THINKING_BUDGET", defaultValue: 512 },
+};
 
 function listSources(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
@@ -118,6 +154,80 @@ function countHelperCalls(fileName: string, text: string): number {
   const visit = (node: ts.Node): void => { if (isHelperCall(node)) n++; ts.forEachChild(node, visit); };
   visit(parse(fileName, text));
   return n;
+}
+
+const lineOf = (sf: ts.SourceFile, n: ts.Node): number => sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
+
+/** `X.이름`·`X["이름"]`(옵셔널 체인 포함)의 이름 — 그 밖은 undefined */
+function memberName(e: ts.Expression): string | undefined {
+  if (ts.isPropertyAccessExpression(e)) return e.name.text;
+  if (ts.isElementAccessExpression(e) && ts.isStringLiteralLike(e.argumentExpression)) return e.argumentExpression.text;
+  return undefined;
+}
+
+/** SDK 요청 지점 수 — 호출식 끝의 `<소유>.<메서드>`가 REQUEST_CALLS인 호출(소유가 변수여도: const { models } = ai) */
+function countRequestSites(fileName: string, text: string): number {
+  let n = 0;
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)
+      && (ts.isPropertyAccessExpression(node.expression) || ts.isElementAccessExpression(node.expression))) {
+      const o = node.expression.expression;
+      const owner = ts.isIdentifier(o) ? o.text : memberName(o);
+      const method = memberName(node.expression);
+      if (owner !== undefined && method !== undefined && REQUEST_CALLS.has(`${owner}.${method}`)) n++;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parse(fileName, text));
+  return n;
+}
+
+/** import 경로 → 저장소 상대 경로(확장자 없음). "@/…"·상대 경로만 — 패키지 이름은 undefined */
+function resolveImport(fromFile: string, spec: string): string | undefined {
+  const p = spec.startsWith("@/") ? path.posix.normalize(spec.slice(2))
+    : spec.startsWith(".") ? path.posix.join(path.posix.dirname(fromFile), spec) : undefined;
+  return p?.replace(/\.[jt]sx?$/, "");
+}
+
+/**
+ * 헬퍼를 import로 확인한다 — 스캐너들은 `geminiTuning(…)`을 이름으로 알아보므로, 그 이름이 그 파일에서 진짜 헬퍼여야 한다.
+ *   imported: `import { geminiTuning } from "@/lib/ai/gemini-config"`(상대 경로도)가 있다
+ *   violations("파일:줄 원문"): 별칭(geminiTuning as X)·네임스페이스(* as G)·동적 import — 스캐너가 호출을 못 알아본다 —
+ *     그리고 다른 것을 geminiTuning이라는 이름으로 들이거나 선언한 것(헬퍼가 아닌데 헬퍼로 센다).
+ *   타입 전용 import는 런타임 헬퍼를 들일 수 없어 보지 않는다.
+ */
+function helperImport(fileName: string, text: string): { imported: boolean; violations: string[] } {
+  const sf = parse(fileName, text);
+  let imported = false;
+  const violations: string[] = [];
+  const flag = (n: ts.Node, what = n.getText(sf)): void => { violations.push(`${fileName}:${lineOf(sf, n)} ${what}`); };
+  const visit = (n: ts.Node): void => {
+    if (ts.isImportDeclaration(n) && ts.isStringLiteral(n.moduleSpecifier) && n.importClause && !n.importClause.isTypeOnly) {
+      const spec = n.moduleSpecifier.text;
+      const fromHelper = resolveImport(fileName, spec) === HELPER_MODULE;
+      const { name, namedBindings } = n.importClause;
+      if (name?.text === HELPER_NAME) flag(name, `${HELPER_NAME} (기본 import) from "${spec}"`);
+      if (namedBindings && ts.isNamespaceImport(namedBindings) && fromHelper) flag(namedBindings);
+      for (const el of namedBindings && ts.isNamedImports(namedBindings) ? namedBindings.elements : []) {
+        if (el.isTypeOnly) continue;
+        if (fromHelper && (el.propertyName ?? el.name).text === HELPER_NAME) {
+          if (el.propertyName) flag(el); else imported = true;
+        } else if (el.name.text === HELPER_NAME) {
+          flag(el, `${el.getText(sf)} from "${spec}"`);
+        }
+      }
+    } else if (ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      const spec = n.arguments[0];
+      if (spec && ts.isStringLiteralLike(spec) && resolveImport(fileName, spec.text) === HELPER_MODULE) flag(n);
+    } else if ((ts.isVariableDeclaration(n) || ts.isFunctionDeclaration(n) || ts.isClassDeclaration(n)
+      || ts.isParameter(n) || ts.isBindingElement(n)) && n.name !== undefined && ts.isIdentifier(n.name)
+      && n.name.text === HELPER_NAME) {
+      flag(n.name, `${HELPER_NAME} 선언`);
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return { imported, violations };
 }
 
 /** 객체 리터럴에서 키의 값 식 — 객체 리터럴이 아니거나 `키: 값` 꼴이 없으면 undefined(축약형은 리터럴이 아니다) */
@@ -197,14 +307,20 @@ function isOwnTuning(call: ts.CallExpression): (e: ts.Expression) => boolean {
   return (e) => e === call || (name !== undefined && ts.isIdentifier(e) && e.text === name);
 }
 
-/** 헬퍼 두 번째 인자의 thinkingBudget — 인자 안의 펼침·계산된 키도 예산을 바꿀 수 있어 원문으로 남긴다. env 예산 파일은 기본값 */
+/**
+ * 헬퍼 두 번째 인자의 thinkingBudget — 숫자 리터럴이면 그 수. 인자 안의 펼침·계산된 키도 예산을 바꿀 수 있어 원문으로 남긴다.
+ *   env 예산 파일(ENV_BUDGET)은 **그 env 식별자일 때만** 기본값 — 그 밖의 식(-1 같은 음수 포함)은 원문이라 위반이 된다.
+ */
 function budgetOf(call: ts.CallExpression, fileName: string, sf: ts.SourceFile): number | string {
   const arg = call.arguments[1];
   if (!arg || !ts.isObjectLiteralExpression(arg)) return `<객체 리터럴 아님: ${(arg ?? call).getText(sf)}>`;
   const b = readKey(arg, "thinkingBudget", sf, () => false);
   if (b.unverifiable.length > 0) return b.unverifiable.join(", ");
   if (b.value === undefined) return "<thinkingBudget 없음>";
-  return ts.isNumericLiteral(b.value) ? Number(b.value.text) : ENV_BUDGET_DEFAULT[fileName] ?? b.value.getText(sf);
+  if (ts.isNumericLiteral(b.value)) return Number(b.value.text);
+  const env = ENV_BUDGET[fileName];
+  return env !== undefined && ts.isIdentifier(b.value) && b.value.text === env.identifier
+    ? env.defaultValue : b.value.getText(sf);
 }
 
 /**
@@ -259,11 +375,89 @@ function thinkingHeadroom(fileName: string, text: string): Headroom[] {
   return rows;
 }
 
-/** 불변식 위반 — 숫자로 못 읽었거나 maxOutputTokens < thinkingBudget + 128 */
-const headroomViolations = (rows: Headroom[]): string[] => rows
+/**
+ * 소스에서 읽은 행의 불변식 위반 — 숫자로 못 읽었거나 maxOutputTokens < thinkingBudget + 128.
+ *   (SDK에 실제로 간 요청은 helpers/gemini-headroom의 headroomViolations가 같은 128로 본다)
+ */
+const rowHeadroomViolations = (rows: Headroom[]): string[] => rows
   .filter((r) => typeof r.budget !== "number" || typeof r.maxOutputTokens !== "number"
     || r.maxOutputTokens < r.budget + MIN_OUTPUT_HEADROOM)
   .map((r) => `${r.at} thinkingBudget=${r.budget} maxOutputTokens=${r.maxOutputTokens}`);
+
+const CAP_KEY = "maxOutputTokens";
+const isCapLiteral = (n: ts.Node): boolean => ts.isStringLiteralLike(n) && n.text === CAP_KEY;
+
+/** 검증된 여유 행의 상한 원소 — 헬퍼 결과가 펼쳐진 config의 `maxOutputTokens: …`·축약형(capOf가 값을 읽는 바로 그 노드) */
+function rowCapMembers(sf: ts.SourceFile): Set<ts.Node> {
+  const members = new Set<ts.Node>();
+  const visit = (n: ts.Node): void => {
+    if (isHelperCall(n)) {
+      for (const p of configsOf(n).flatMap((c) => [...c.properties])) {
+        if ((ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) && keyName(p.name) === CAP_KEY) members.add(p);
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return members;
+}
+
+/** 쓰기 대상이 `X.maxOutputTokens`·`X["maxOutputTokens"]`면 그 이름 노드 */
+function capWriteTarget(e: ts.Expression): ts.Node | undefined {
+  if (ts.isPropertyAccessExpression(e) && e.name.text === CAP_KEY) return e.name;
+  if (ts.isElementAccessExpression(e) && isCapLiteral(e.argumentExpression)) return e.argumentExpression;
+  return undefined;
+}
+
+/** 객체 리터럴이 Object.assign(대상, …원본)의 원본 자리인가 */
+function isObjectAssignSource(obj: ts.ObjectLiteralExpression): boolean {
+  const call = obj.parent;
+  return ts.isCallExpression(call) && call.arguments.indexOf(obj) >= 1
+    && ts.isPropertyAccessExpression(call.expression) && call.expression.name.text === "assign"
+    && ts.isIdentifier(call.expression.expression) && call.expression.expression.text === "Object";
+}
+
+/**
+ * maxOutputTokens를 정할 수 있는 모든 곳 — 객체 리터럴의 `키: 값`·축약형·메서드/접근자·계산된 키(["maxOutputTokens"]),
+ *   사후 쓰기(X.maxOutputTokens = …·X["maxOutputTokens"] = …·복합 대입·++/--), 그 밖의 문자열 "maxOutputTokens"(const K =
+ *   "maxOutputTokens" 뒤 cfg[K] = … 처럼 키로 쓰일 수 있다). Object.assign 원본 리터럴의 원소는 원문 앞에 "Object.assign 원본".
+ *   타입 위치(interface·Pick<…, "maxOutputTokens">)는 값이 아니라 뺀다. 읽기(cfg.maxOutputTokens)는 상한을 정하지 않는다.
+ */
+function capOccurrences(sf: ts.SourceFile): { node: ts.Node; text: string }[] {
+  const found: { node: ts.Node; text: string }[] = [];
+  const covered = new Set<ts.Node>();   // 계산된 키·쓰기 대상으로 이미 센 문자열
+  const visit = (n: ts.Node): void => {
+    if (ts.isTypeNode(n) && !ts.isExpressionWithTypeArguments(n)) return;
+    if ((ts.isPropertyAssignment(n) || ts.isShorthandPropertyAssignment(n) || ts.isMethodDeclaration(n)
+      || ts.isGetAccessorDeclaration(n) || ts.isSetAccessorDeclaration(n)) && ts.isObjectLiteralExpression(n.parent)) {
+      const name = n.name;
+      const computed = ts.isComputedPropertyName(name) && isCapLiteral(name.expression) ? name.expression : undefined;
+      if (computed) covered.add(computed);
+      if (computed || keyName(name) === CAP_KEY) {
+        found.push({ node: n, text: `${isObjectAssignSource(n.parent) ? "Object.assign 원본 " : ""}${n.getText(sf)}` });
+      }
+    } else {
+      const written = ts.isBinaryExpression(n) && n.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+        && n.operatorToken.kind <= ts.SyntaxKind.LastAssignment ? n.left
+        : (ts.isPrefixUnaryExpression(n) || ts.isPostfixUnaryExpression(n))
+          && (n.operator === ts.SyntaxKind.PlusPlusToken || n.operator === ts.SyntaxKind.MinusMinusToken) ? n.operand
+          : undefined;
+      const target = written && capWriteTarget(written);
+      if (target) { covered.add(target); found.push({ node: n, text: n.getText(sf) }); }
+      else if (isCapLiteral(n) && !covered.has(n)) found.push({ node: n, text: n.parent.getText(sf) });
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return found;
+}
+
+/** 검증된 여유 행 밖의 maxOutputTokens — "파일:줄 원문". 행 안의 값은 thinkingHeadroom·rowHeadroomViolations가 숫자로 본다 */
+function capClosureViolations(fileName: string, text: string): string[] {
+  const sf = parse(fileName, text);
+  const verified = rowCapMembers(sf);
+  return capOccurrences(sf).filter((o) => !verified.has(o.node)).map((o) => `${fileName}:${lineOf(sf, o.node)} ${o.text}`);
+}
 
 describe("스캐너 자체 검증 — 공허한 게이트가 아니다", () => {
   it("헬퍼를 건너뛴 리터럴은 키마다 잡는다", () => {
@@ -333,7 +527,7 @@ describe("스캐너 자체 검증 — 공허한 게이트가 아니다", () => {
       { at: "h.ts:10", budget: 64, maxOutputTokens: 192 },
     ]);
     // 64+128=192는 경계 — 통과. 상한 없음(Live)도 통과
-    expect(headroomViolations(rows)).toEqual([
+    expect(rowHeadroomViolations(rows)).toEqual([
       "h.ts:1 thinkingBudget=64 maxOutputTokens=64",
       "h.ts:3 thinkingBudget=512 maxOutputTokens=600",
       "h.ts:7 thinkingBudget=B maxOutputTokens=MAX",
@@ -373,7 +567,7 @@ describe("스캐너 자체 검증 — 공허한 게이트가 아니다", () => {
       { at: "n.ts:13", budget: "<객체 리터럴 아님: opts>", maxOutputTokens: 256 },
     ]);
     // 다른 키의 축약형(systemInstruction·tools)과 헬퍼 결과 변수 펼침만 있는 config(8행)만 통과
-    expect(headroomViolations(rows)).toEqual([
+    expect(rowHeadroomViolations(rows)).toEqual([
       "n.ts:1 thinkingBudget=64 maxOutputTokens=maxOutputTokens",
       "n.ts:2 thinkingBudget=64 maxOutputTokens=...LIMITS",
       "n.ts:3 thinkingBudget=64 maxOutputTokens=...LIMITS",
@@ -401,6 +595,95 @@ describe("스캐너 자체 검증 — 공허한 게이트가 아니다", () => {
     ].join("\n");
     // 🔒 가린 이름을 바깥 상수로 읽으면, 함수 안에서 상한을 64로 다시 선언해도 2048로 보고 녹색이 된다
     expect(thinkingHeadroom("k.ts", src).map((r) => r.maxOutputTokens)).toEqual([2048, "LET_CAP", "EXPR_CAP", "SHADOW", "NOWHERE"]);
+  });
+
+  it("thinking 여유 — env 기본값은 그 파일의 env 식별자에만, -1 같은 식·다른 식별자는 원문으로 위반", () => {
+    const cfg = (budget: string) =>
+      `const c = { ...geminiTuning(m, { thinkingBudget: ${budget}, thinkingLevel: "low" }), maxOutputTokens: 2048 };`;
+    const src = [cfg("THINKING_BUDGET"), cfg("-1"), cfg("OTHER_BUDGET"), cfg("THINKING_BUDGET * 2")].join("\n");
+    const rows = thinkingHeadroom("lib/chat/llm.ts", src);
+    expect(rows.map((r) => r.budget)).toEqual([512, "-1", "OTHER_BUDGET", "THINKING_BUDGET * 2"]);
+    // 🔒 예전 판독기는 llm.ts의 숫자 아닌 예산을 전부 512로 읽었다 — -1(동적 thinking)도 녹색
+    expect(rowHeadroomViolations(rows)).toEqual([
+      "lib/chat/llm.ts:2 thinkingBudget=-1 maxOutputTokens=2048",
+      "lib/chat/llm.ts:3 thinkingBudget=OTHER_BUDGET maxOutputTokens=2048",
+      "lib/chat/llm.ts:4 thinkingBudget=THINKING_BUDGET * 2 maxOutputTokens=2048",
+    ]);
+    // env 예산 파일이 아니면 같은 이름도 원문
+    expect(thinkingHeadroom("lib/chat/other.ts", cfg("THINKING_BUDGET"))[0].budget).toBe("THINKING_BUDGET");
+  });
+
+  it("요청 지점 — models.generateContent·generateContentStream·authTokens.create·live.connect만 센다(점·대괄호·옵셔널 체인)", () => {
+    const src = [
+      `await getGenAI().models.generateContent({ model, contents });`,
+      `await ai.models.generateContentStream({ model, contents });`,
+      `await ai.authTokens.create({ config });`,
+      `await ai.live.connect({ model, callbacks });`,
+      `await ai?.models?.["generateContent"]({ model, contents });`,
+      `const { models } = ai; await models.generateContent({ model, contents });`,
+      `await model.generateContent(prompt);`,               // 어댑터 호출 — 요청 지점은 어댑터 안쪽(models.…)이다
+      `await ai.models.embedContent({ model, contents });`,
+      `source.connect(analyser); this.connect();`,
+      `const s = "ai.models.generateContent(x)"; // ai.live.connect()`,
+    ].join("\n");
+    expect(countRequestSites("r.ts", src)).toBe(6);
+  });
+
+  it("헬퍼 import — 이름 그대로면 imported, 별칭·네임스페이스·동적 import·같은 이름의 다른 것은 위반", () => {
+    expect(helperImport("lib/a.ts", `import { geminiTuning } from "@/lib/ai/gemini-config";`))
+      .toEqual({ imported: true, violations: [] });
+    expect(helperImport("lib/chat/b.ts", `import { geminiTuning, type GeminiTuning } from "../ai/gemini-config";`))
+      .toEqual({ imported: true, violations: [] });
+    const bad = [
+      `import { geminiTuning as tune } from "@/lib/ai/gemini-config";`,
+      `import * as G from "@/lib/ai/gemini-config";`,
+      `const m = await import("@/lib/ai/gemini-config");`,
+      `import { geminiTuning } from "@/lib/ai/other-config";`,
+      `import { acceptsLegacyTuning as geminiTuning } from "./gemini-config";`,
+      `function geminiTuning() { return {}; }`,
+      `import type * as T from "@/lib/ai/gemini-config";`,   // 타입 전용 — 런타임 헬퍼를 들일 수 없다(위반 아님)
+    ].join("\n");
+    // 🔒 별칭·네임스페이스면 스캐너가 tune(…)·G.geminiTuning(…)을 헬퍼 호출로 못 알아본다
+    expect(helperImport("lib/ai/c.ts", bad)).toEqual({ imported: false, violations: [
+      "lib/ai/c.ts:1 geminiTuning as tune",
+      "lib/ai/c.ts:2 * as G",
+      `lib/ai/c.ts:3 import("@/lib/ai/gemini-config")`,
+      `lib/ai/c.ts:4 geminiTuning from "@/lib/ai/other-config"`,
+      `lib/ai/c.ts:5 acceptsLegacyTuning as geminiTuning from "./gemini-config"`,
+      "lib/ai/c.ts:6 geminiTuning 선언",
+    ] });
+  });
+
+  it("maxOutputTokens 닫힘 — 행 밖의 모든 꼴을 원문으로 잡고, 헬퍼 결과를 펼친 config의 상한(축약형 포함)만 통과", () => {
+    const T = `geminiTuning(m, { thinkingBudget: 64, thinkingLevel: "low" })`;
+    const src = [
+      `const ok = { ...${T}, maxOutputTokens: 1024 };`,
+      `function f() { const t = ${T}; return { ...t, maxOutputTokens: 256 }; }`,
+      `const rs = { ...${T}, maxOutputTokens };`,             // 행의 축약형 — 값은 여유 검사가 원문으로 위반 처리
+      `const re = { ...ok, maxOutputTokens: 128 };`,
+      `ok.maxOutputTokens = 64;`,
+      `ok["maxOutputTokens"] ??= 64;`,
+      `ok.maxOutputTokens--;`,
+      `Object.assign(ok, { maxOutputTokens: 64 });`,
+      `const s = { maxOutputTokens };`,
+      `const c = { ["maxOutputTokens"]: 64 };`,
+      `const K = "maxOutputTokens";`,
+      `const g = { get maxOutputTokens() { return 64; } };`,
+      `interface L { maxOutputTokens?: number } type P = Pick<L, "maxOutputTokens">;`,
+      `const r = ok.maxOutputTokens; // maxOutputTokens: 1`,
+    ].join("\n");
+    // 1~3행(검증된 행)·13행(타입)·14행(읽기·주석)만 통과
+    expect(capClosureViolations("z.ts", src)).toEqual([
+      "z.ts:4 maxOutputTokens: 128",
+      "z.ts:5 ok.maxOutputTokens = 64",
+      `z.ts:6 ok["maxOutputTokens"] ??= 64`,
+      "z.ts:7 ok.maxOutputTokens--",
+      "z.ts:8 Object.assign 원본 maxOutputTokens: 64",
+      "z.ts:9 maxOutputTokens",
+      `z.ts:10 ["maxOutputTokens"]: 64`,
+      `z.ts:11 K = "maxOutputTokens"`,
+      "z.ts:12 get maxOutputTokens() { return 64; }",
+    ]);
   });
 });
 
@@ -456,6 +739,60 @@ describe("오늘 세대 thinking 여유 — maxOutputTokens ≥ thinkingBudget +
   it("thinkingBudget + 128 ≤ maxOutputTokens", () => {
     // 🔒 maxOutputTokens는 thinking을 포함한다 — 걸린 호출부는 예산만큼 생각하다 상한에 닿아 답이 잘린다.
     //   JSON 호출부는 파싱 실패를 삼켜 조용히 품질만 떨어진다(정신건강 분류 64/64: 2026-10-07 실측 7개 중 5개 -1).
-    expect(headroomViolations(rows)).toEqual([]);
+    expect(rowHeadroomViolations(rows)).toEqual([]);
+  });
+});
+
+const read = (f: string): string => readFileSync(f, "utf-8");
+
+describe("SDK 요청 지점 인벤토리 — 라우팅된 파일 + 허용 목록뿐 (헬퍼는 import로 확인)", () => {
+  const sources = ROOTS.flatMap(listSources);
+  const files = sources.filter((f) => f !== HELPER_FILE);
+
+  it("표의 라우팅 쪽 = ROUTED_FILES, 허용 목록과 겹치지 않는다", () => {
+    expect(Object.keys(ROUTED_REQUEST_SITES).sort()).toEqual(Object.keys(ROUTED_FILES).sort());
+    expect(Object.keys(REQUEST_ALLOWLIST).filter((f) => Object.hasOwn(ROUTED_FILES, f))).toEqual([]);
+  });
+
+  it("파일별 요청 지점 수가 정확히 라우팅된 파일 + 허용 목록이다 (헬퍼 파일 포함 전체)", () => {
+    const inventory = Object.fromEntries(sources
+      .map((f) => [f, countRequestSites(f, read(f))] as const)
+      .filter(([, n]) => n > 0));
+    // 🔒 표 밖 파일·지점이 보이면: 그 요청은 헬퍼·thinkingLevel·여유 검사를 모두 건너뛴다 — 헬퍼로 라우팅하거나,
+    //   모델 세대별로 갈라야 할 필드가 정말 없다면 이유를 적어 REQUEST_ALLOWLIST에 올려라
+    expect(inventory).toEqual({ ...ROUTED_REQUEST_SITES, ...REQUEST_ALLOWLIST });
+  });
+
+  it("요청 지점이 있는 파일은 헬퍼를 이름 그대로 import해 부르거나 허용 목록에 있다", () => {
+    const offenders = files.filter((f) => {
+      const text = read(f);
+      if (countRequestSites(f, text) === 0 || Object.hasOwn(REQUEST_ALLOWLIST, f)) return false;
+      return !(helperImport(f, text).imported && countHelperCalls(f, text) > 0);
+    });
+    expect(offenders).toEqual([]);
+  });
+
+  it("헬퍼 import — 별칭·네임스페이스·동적 import·같은 이름의 다른 것 0건", () => {
+    // 🔒 별칭(geminiTuning as X)·네임스페이스(G.geminiTuning)면 스캐너가 그 호출을 못 알아본다 —
+    //   금지 키·thinkingLevel·여유 검사가 그 호출부를 건너뛴다. 이름 그대로 import하라
+    expect(files.flatMap((f) => helperImport(f, read(f)).violations)).toEqual([]);
+  });
+});
+
+describe("maxOutputTokens 닫힘 — app/·lib/의 상한은 전부 검증된 여유 행이다", () => {
+  const sources = ROOTS.flatMap(listSources);
+
+  it("오늘: maxOutputTokens 11곳 = 상한이 있는 여유 행 11개 (오탐 0 · 공허하지 않음)", () => {
+    const occurrences = sources.flatMap((f) => capOccurrences(parse(f, read(f))));
+    const cappedRows = Object.keys(ROUTED_FILES).flatMap((f) => thinkingHeadroom(f, read(f)))
+      .filter((r) => r.maxOutputTokens !== Infinity);
+    expect(occurrences.length).toBe(11);
+    expect(cappedRows.length).toBe(11);
+  });
+
+  it("검증된 행 밖의 maxOutputTokens 0건", () => {
+    // 🔒 행 밖에서 정한 상한은 여유 검사를 받지 않는다 — config를 다시 펼쳐 덮어쓰거나({ ...cfg, maxOutputTokens: 128 })
+    //   나중에 고치지(cfg.maxOutputTokens = 64·Object.assign) 말고, 헬퍼 결과를 펼친 config 리터럴에 적어라
+    expect(sources.flatMap((f) => capClosureViolations(f, read(f)))).toEqual([]);
   });
 });

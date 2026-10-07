@@ -9,8 +9,11 @@
  *   ④ 역할별 지시문 — 일반인이 인지 확인 지시를 받았다.
  *      ⚠ 이 파일의 첫 버전은 buildSystemPrompt에 넘긴 **mode 인자만** 확인했다. 실제 지시문은
  *      mode와 무관했는데도 통과했다(적대 감사 지적, F5). 이제 **토큰에 실린 systemInstruction**을 본다.
+ * thinking 여유: 테스트마다 발급한 토큰의 Live 연결 제약(liveConnectConstraints의 model·config) 전부를 afterEach가
+ *   helpers/gemini-headroom으로 본다.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { headroomViolations, type CapturedRequest } from "@/__tests__/helpers/gemini-headroom";
 
 let session: { user: { id: string; screeningMode?: string } } | null = null;
 let usage = { used: 0, limit: 200, exceeded: false, nearLimit: false, remaining: 200 };
@@ -66,6 +69,15 @@ beforeEach(() => {
   consented = true;
   session = { user: { id: "u-elder", screeningMode: "user" } };
   for (const f of [getDailyUsage, buildSystemPrompt, createToken]) f.mockClear();
+});
+
+/** 발급한 토큰마다 Live 연결 제약(모델·세션 config) — 브라우저 세션에 실제로 걸리는 설정 */
+const issuedRequests = (): CapturedRequest[] =>
+  createToken.mock.calls.map(([a]) => a.config.liveConnectConstraints as unknown as CapturedRequest);
+
+afterEach(() => {
+  // 🔒 세션 config에 상한을 넣으면 thinking과 나눠 쓴다 — 예산 + 128 아래면 응답이 잘린다
+  expect(headroomViolations(issuedRequests()), "발급한 Live 세션 제약의 thinking 여유 (maxOutputTokens ≥ thinkingBudget + 128)").toEqual([]);
 });
 
 describe("역할 차단", () => {

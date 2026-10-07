@@ -7,10 +7,13 @@
  *
  * 목 체제(chat-text-gates와 같은 틀): 세션·prisma·레이트리밋·날씨·프롬프트·저장·알림·백스톱. 전사 결과는 빈
  *   문자열로 정해 "인식 실패 → 재질문"으로 끝나게 한다 — 동반자 LLM은 덫이라 불리면 이 테스트가 깨진다.
+ * thinking 여유: 테스트마다 붙잡은 전사 요청 전부를 afterEach가 helpers/gemini-headroom으로 본다
+ *   (maxOutputTokens ≥ thinkingBudget + 128 — 모자라면 예산만큼 생각하다 상한에 닿아 전사가 잘린다).
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { headroomViolations, type CapturedRequest } from "@/__tests__/helpers/gemini-headroom";
 
-type Req = { model: string; config: Record<string, unknown> };
+type Req = CapturedRequest;
 const sttCalls: Req[] = [];
 
 vi.mock("next-auth", () => ({
@@ -80,6 +83,10 @@ async function sendVoice() {
 beforeEach(() => {
   sttCalls.length = 0;
   delete process.env.STT_MODEL;
+});
+
+afterEach(() => {
+  expect(headroomViolations(sttCalls), "SDK에 간 전사 요청의 thinking 여유 (maxOutputTokens ≥ thinkingBudget + 128)").toEqual([]);
 });
 
 describe("/api/chat 음성 전사 요청 — 모델 세대별 (2026-10-07)", () => {

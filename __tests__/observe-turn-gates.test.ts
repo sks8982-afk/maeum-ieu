@@ -9,12 +9,15 @@
  *
  * 목 체제: 세션·레이트리밋·prisma·전사(Gemini)·백스톱·알림. 감지·STT 신뢰도 판정은 **실제 코드** —
  *   두 판정이 같은 발화에 대해 엇갈리는 게 이 결함의 본질이라, 둘 다 진짜여야 의미가 있다.
+ * thinking 여유: 테스트마다 붙잡은 전사 요청(모델·config) 전부를 afterEach가 helpers/gemini-headroom으로 본다.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { headroomViolations, type CapturedRequest } from "@/__tests__/helpers/gemini-headroom";
 
 const pending: Promise<unknown>[] = [];
 const sttCalls: number[] = [];
-const sttConfigs: { abortSignal?: unknown }[] = [];
+/** 전사 요청 — 모델까지 적는다(여유 검사는 오늘 세대 모델에만 닿는다) */
+const sttReqs: CapturedRequest[] = [];
 let session: { user: { id: string; name?: string; screeningMode?: string } } | null = null;
 let transcript = "";
 
@@ -57,8 +60,8 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/chat/llm", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/chat/llm")>()),
   // 전사 호출을 기록한다 — 막혀야 할 계정이면 전사(=건강 음성 처리) 자체가 일어나면 안 된다
-  getGenAI: () => ({ models: { generateContent: async (req: { config?: { abortSignal?: unknown } }) => {
-    sttCalls.push(1); sttConfigs.push(req?.config ?? {}); return {};
+  getGenAI: () => ({ models: { generateContent: async (req: CapturedRequest) => {
+    sttCalls.push(1); sttReqs.push(req); return {};
   } } }),
   extractText: () => transcript,          // 전사 결과를 테스트가 정한다
   logUsage: () => {},
@@ -92,13 +95,18 @@ beforeEach(() => {
   consentRow = { consentedAt: new Date("2026-01-01") };
   sensitiveRows = BOTH;
   sttCalls.length = 0;
-  sttConfigs.length = 0;
+  sttReqs.length = 0;
   session = { user: { id: "u-elder", name: "김어르신", screeningMode: "user" } };
   messageCreate.mockClear();
   notifyGuardian.mockClear();
   countArgs.length = 0;
   backstop.mockReset();
   backstop.mockImplementation(async () => null);
+});
+
+afterEach(() => {
+  // 🔒 감시 전사가 잘리면 응급을 포함한 조각이 빈 전사로 버려진다
+  expect(headroomViolations(sttReqs), "SDK에 간 감시 전사 요청의 thinking 여유 (maxOutputTokens ≥ thinkingBudget + 128)").toEqual([]);
 });
 
 describe("백스톱만 잡는 응급 — STT 저신뢰여도 버리지 않는다", () => {
@@ -222,9 +230,9 @@ describe("서버·클라 상한의 관계", () => {
 describe("전사 타임아웃 (2026-10-06)", () => {
   it("전사 호출에 중단 신호가 실린다 — Gemini가 매달려도 요청이 끝난다", async () => {
     await call("오늘 날씨 좋네");
-    expect(sttConfigs.length).toBe(1);
+    expect(sttReqs.length).toBe(1);
     // 🔒 이전엔 신호가 없어, 전사가 매달리는 동안 요청이 끝나지 않았고 클라는 그 사이 조각을 버렸다
-    expect(sttConfigs[0].abortSignal).toBeInstanceOf(AbortSignal);
+    expect(sttReqs[0].config.abortSignal).toBeInstanceOf(AbortSignal);
   });
 });
 
@@ -235,8 +243,9 @@ describe("전사 타임아웃 (2026-10-06)", () => {
 describe("전사 샘플링·thinking — 모델 세대별 (2026-10-07)", () => {
   it("오늘 모델(2.5)이면 HEAD(53eb438)와 같은 요청 — temperature 0 · thinkingBudget 64", async () => {
     await call("오늘 날씨 좋네");
-    expect(sttConfigs.length).toBe(1);
-    const cfg = sttConfigs[0] as Record<string, unknown>;
+    expect(sttReqs.length).toBe(1);
+    expect(sttReqs[0].model).toBe("gemini-2.5-flash");
+    const cfg = sttReqs[0].config;
     // 🔒 키 집합까지 고정 — 헬퍼 결과를 안 펼치면 temperature·thinkingConfig가 통째로 빠진다
     expect(Object.keys(cfg).sort()).toEqual(["abortSignal", "maxOutputTokens", "safetySettings", "temperature", "thinkingConfig"]);
     expect(cfg.temperature).toBe(0);
@@ -251,8 +260,9 @@ describe("전사 샘플링·thinking — 모델 세대별 (2026-10-07)", () => {
     } finally {
       delete process.env.STT_MODEL;
     }
-    expect(sttConfigs.length).toBe(1);
-    const cfg = sttConfigs[0] as Record<string, unknown>;
+    expect(sttReqs.length).toBe(1);
+    expect(sttReqs[0].model).toBe("gemini-4-flash");
+    const cfg = sttReqs[0].config;
     expect(cfg).not.toHaveProperty("temperature");
     expect(cfg.thinkingConfig).toStrictEqual({ thinkingLevel: "LOW" });
   });
