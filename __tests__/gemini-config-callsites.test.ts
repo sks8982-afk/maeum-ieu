@@ -152,6 +152,17 @@ describe("동반자 getTextModel — HEAD 그대로", () => {
   });
 
   it.each([
+    ["1920", 1920],   // 경계 — 1920 이하는 그대로(오늘과 같은 요청)
+    ["5000", 1920],   // 상한 2048 − 여유 128 = 1920으로 자른다
+  ] as const)("COMPANION_THINKING_BUDGET=%s → thinkingBudget %i (1921 이상이면 답 쓸 자리가 없다 → 잘림·폴백 문구)", async (env, budget) => {
+    process.env.COMPANION_THINKING_BUDGET = env;
+    await getTextModel("SYS", false).generateContent("안녕");
+    const [c] = expectCalls(1);
+    // 🔒 자르는 쪽은 예산이다 — 상한(maxOutputTokens 2048)과 나머지 키는 그대로
+    expect(c.config).toStrictEqual({ systemInstruction: "SYS", ...base, thinkingConfig: { thinkingBudget: budget } });
+  });
+
+  it.each([
     ["COMPANION_MODEL", "gemini-4-flash", false],
     ["COMPANION_PROBE_MODEL", "gemini-flash-latest", true],
   ] as const)("%s=%s 로 올리면 temperature·thinkingBudget 없이 thinkingLevel LOW", async (env, model, probe) => {

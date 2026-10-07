@@ -63,7 +63,8 @@ const MIN_OUTPUT_HEADROOM = 128;
 /**
  * 예산을 env로 정하는 호출부 — 소스에서 값을 읽을 수 없어 기본값을 적는다. 이 기본값은 실요청 캡처
  *   (gemini-config-callsites '동반자 getTextModel': thinkingBudget 512)가 고정한다 — 바꾸면 둘 다 바꿀 것.
- *   ⚠ env(COMPANION_THINKING_BUDGET)로 1921 이상을 주면 이 불변식 밖이다(maxOutputTokens 2048).
+ *   env(COMPANION_THINKING_BUDGET)로 1921 이상을 줘도 llm.ts가 1920(상한 2048 − 128)에서 자른다 — 그 상한은
+ *   소스로 못 읽어서 gemini-config-callsites가 "5000" → 1920을 실요청으로 고정한다.
  */
 const ENV_BUDGET_DEFAULT: Record<string, number> = { "lib/chat/llm.ts": 512 };
 
@@ -207,14 +208,37 @@ function budgetOf(call: ts.CallExpression, fileName: string, sf: ts.SourceFile):
 }
 
 /**
- * 헬퍼 결과가 펼쳐진 config의 maxOutputTokens — 숫자 리터럴이면 그 수, 그 밖의 꼴은 원문(위반으로 드러난다).
+ * 숫자 리터럴, 또는 같은 파일 **최상위** `const 이름 = <숫자 리터럴>`을 가리키는 식별자의 값 — 그 밖은 undefined.
+ *   상한을 이름 붙인 상수로 적는 호출부용(동반자: config 상한과 thinking 예산 상한이 COMPANION_MAX_OUTPUT_TOKENS
+ *   하나를 쓴다). 그 이름의 선언이 파일에 하나뿐일 때만 읽는다 — 안쪽에서 같은 이름을 다시 선언하면(가림) 못 읽은 것.
+ */
+function numericValue(e: ts.Expression, sf: ts.SourceFile): number | undefined {
+  if (ts.isNumericLiteral(e)) return Number(e.text);
+  if (!ts.isIdentifier(e)) return undefined;
+  const decls: ts.Node[] = [];
+  const visit = (n: ts.Node): void => {
+    if ((ts.isVariableDeclaration(n) || ts.isParameter(n) || ts.isBindingElement(n) || ts.isFunctionDeclaration(n))
+      && n.name !== undefined && ts.isIdentifier(n.name) && n.name.text === e.text) decls.push(n);
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  const d = decls.length === 1 ? decls[0] : undefined;
+  if (!d || !ts.isVariableDeclaration(d) || !d.initializer || !ts.isNumericLiteral(d.initializer)) return undefined;
+  const list = d.parent;
+  const topLevelConst = ts.isVariableDeclarationList(list) && (list.flags & ts.NodeFlags.Const) !== 0
+    && ts.isVariableStatement(list.parent) && list.parent.parent === sf;
+  return topLevelConst ? Number(d.initializer.text) : undefined;
+}
+
+/**
+ * 헬퍼 결과가 펼쳐진 config의 maxOutputTokens — 숫자(리터럴·최상위 숫자 상수)면 그 수, 그 밖의 꼴은 원문(위반으로 드러난다).
  *   Infinity(상한 없음 = 모델 기본 상한, Live)는 상한이 **어떤 꼴로도 없고** 헬퍼 결과 말고는 펼침도 없을 때만.
  */
 function capOf(config: ts.ObjectLiteralExpression, call: ts.CallExpression, sf: ts.SourceFile): number | string {
   const m = readKey(config, "maxOutputTokens", sf, isOwnTuning(call));
   if (m.unverifiable.length > 0) return m.unverifiable.join(", ");
   if (m.value === undefined) return Infinity;
-  return ts.isNumericLiteral(m.value) ? Number(m.value.text) : m.value.getText(sf);
+  return numericValue(m.value, sf) ?? m.value.getText(sf);
 }
 
 /** 헬퍼 호출마다 (오늘 세대에 싣는 thinkingBudget, 그 결과가 펼쳐진 config의 maxOutputTokens) 쌍 */
@@ -360,6 +384,23 @@ describe("스캐너 자체 검증 — 공허한 게이트가 아니다", () => {
       "n.ts:12 thinkingBudget=thinkingBudget maxOutputTokens=256",
       "n.ts:13 thinkingBudget=<객체 리터럴 아님: opts> maxOutputTokens=256",
     ]);
+  });
+
+  it("thinking 여유 — 상한이 식별자면 같은 파일 최상위 숫자 const만 읽는다 (let·계산식·가린 이름·선언 없음은 원문)", () => {
+    const T = `geminiTuning(m, { thinkingBudget: 512, thinkingLevel: "low" })`;
+    const src = [
+      `const CAP = 2048;`,
+      `let LET_CAP = 2048;`,
+      `const EXPR_CAP = 1024 * 2;`,
+      `const SHADOW = 2048;`,
+      `const a = { ...${T}, maxOutputTokens: CAP };`,
+      `const b = { ...${T}, maxOutputTokens: LET_CAP };`,
+      `const c = { ...${T}, maxOutputTokens: EXPR_CAP };`,
+      `function f(SHADOW: number) { return { ...${T}, maxOutputTokens: SHADOW }; }`,
+      `const e = { ...${T}, maxOutputTokens: NOWHERE };`,
+    ].join("\n");
+    // 🔒 가린 이름을 바깥 상수로 읽으면, 함수 안에서 상한을 64로 다시 선언해도 2048로 보고 녹색이 된다
+    expect(thinkingHeadroom("k.ts", src).map((r) => r.maxOutputTokens)).toEqual([2048, "LET_CAP", "EXPR_CAP", "SHADOW", "NOWHERE"]);
   });
 });
 

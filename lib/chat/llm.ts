@@ -99,6 +99,14 @@ export function logUsage(label: string, res: any): void {
 }
 
 /**
+ * 동반자 응답 상한(토큰) — thinking 토큰을 **포함**한다(문서 "including thought tokens").
+ *   요청의 maxOutputTokens와 getTextModel의 thinking 예산 상한이 이 상수 하나를 쓴다(하나만 고치면 둘이 어긋난다).
+ */
+const COMPANION_MAX_OUTPUT_TOKENS = 2048;
+/** 예산만큼 생각하고도 답을 쓸 몫 — 예산 상한 = 2048 − 128 = 1920. SDK 경계 불변식(gemini-config-callsites)과 같은 값 */
+const COMPANION_REPLY_HEADROOM = 128;
+
+/**
  * 텍스트 응답용 — Gemini API + googleSearch (실시간 날짜/뉴스 필수)
  * @param probeTurn 이번 턴이 '인지 확인' 턴인가. true면 지시 준수력이 높은 모델로 올린다.
  *   근거(2026-09-30 실측, 고정 맥락 6회): 확인 턴 지시 준수 2.5-flash 4/6 · 3.5-flash-lite 4/6 ·
@@ -112,10 +120,15 @@ export function getTextModel(systemInstruction: string, enableSearch: boolean = 
   // gemini-3.5-flash는 thinking 모델 — 기본(무제한) thinking 예산이면 출력 전 ~10초 추론(응답 지연 주범).
   //   thinkingBudget을 낮은 양수로 제한해 추론시간 단축(첫 응답 빨라짐). 0은 빈응답 유발이라 금지(최소 64로 클램프).
   //   responseDelay 측정으로 도입(2026-06-05). COMPANION_THINKING_BUDGET env로 A/B 튜닝 가능(2026-06-11).
+  //   위로는 상한 − 여유(1920)에서 자른다(2026-10-07): maxOutputTokens가 thinking을 포함해서, env로 1921 이상을
+  //   주면 예산만큼 생각하다 상한에 닿아 답이 잘리거나 비어 폴백 문구가 나간다. 1920 이하는 그대로(요청 불변).
   //   ※ 이 예산은 ≤3.8 모델에만 실린다. 3.9+·4+·별칭 모델은 thinkingBudget을 400으로 거부하므로
   //     lib/ai/gemini-config가 thinkingLevel "low"로 바꿔 보낸다(예산을 둔 목적 = 사고 제한).
   const parsed = parseInt(process.env.COMPANION_THINKING_BUDGET || "512", 10);
-  const THINKING_BUDGET = Number.isFinite(parsed) && parsed >= 64 ? parsed : 512;
+  const THINKING_BUDGET = Math.min(
+    Number.isFinite(parsed) && parsed >= 64 ? parsed : 512,
+    COMPANION_MAX_OUTPUT_TOKENS - COMPANION_REPLY_HEADROOM,
+  );
   // 키 미설정 시 **동기 throw 금지** — 호출부(route.ts)는 getTextModel을 폴백 try 블록 *바깥*에서
   //   호출하므로, 여기서 throw하면 500이 되고 클라이언트는 아무것도 표시하지 않아
   //   어르신이 인사도 오류도 없는 완전한 빈 화면을 본다(2026-10-01 감사).
@@ -144,14 +157,14 @@ export function getTextModel(systemInstruction: string, enableSearch: boolean = 
     ? {
         cachedContent,
         ...tuning,
-        maxOutputTokens: 2048,
+        maxOutputTokens: COMPANION_MAX_OUTPUT_TOKENS,
         safetySettings: COMPANION_SAFETY_SETTINGS,
         tools,
       }
     : {
         systemInstruction,
         ...tuning,
-        maxOutputTokens: 2048,
+        maxOutputTokens: COMPANION_MAX_OUTPUT_TOKENS,
         safetySettings: COMPANION_SAFETY_SETTINGS,
         tools,
       };
