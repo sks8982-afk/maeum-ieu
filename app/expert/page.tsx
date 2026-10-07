@@ -128,6 +128,20 @@ export default function ExpertPage() {
                   {copied ? "복사됨 ✓" : "복사"}
                 </button>
               </div>
+              {/* 2026-10-07: 앱 푸시가 오려면 무엇이 필요한지 화면 어디에도 없었다 — 연결만 하고 앱에 로그인하지 않은
+                  보호자는 알림을 못 받는데도 "위급 알림을 받을 수 있어요"로만 안내됐다(보호자 앱 푸시 추적) */}
+              <div className="mt-4 rounded-xl bg-white/70 px-4 py-3 text-xs leading-relaxed text-teal-900 dark:bg-zinc-900/60 dark:text-teal-100">
+                <p className="font-semibold">📱 위급 알림을 휴대폰으로 받으려면</p>
+                <ol className="mt-1 list-decimal space-y-0.5 pl-5">
+                  <li><b>안드로이드 휴대폰</b>에 <b>마음이음 앱</b>을 설치하고, 앱에서 <b>이 계정으로 로그인</b>해 두세요.</li>
+                  <li>앱이 알림 권한을 물으면 <b>허용</b>을 눌러 주세요.</li>
+                  <li>위 코드를 {viewerRole === "guardian" ? "어르신" : "환자"} 계정에서 입력해 <b>연결</b>해 주세요.</li>
+                </ol>
+                {/* "로그아웃하면 안 온다"고 약속하지 않는다 — 구버전 앱은 저장해 둔 계정을 잃어 로그아웃해도 구독이 남을 수 있었다(재검토).
+                    보호자에게 필요한 건 "계속 받으려면 로그인을 유지"라는 안내다 */}
+                <p className="mt-1 text-teal-700 dark:text-teal-300">알림을 계속 받으려면 앱에서 로그아웃하지 말고 이 계정으로 로그인해 두세요.</p>
+                <p className="mt-0.5 text-teal-700 dark:text-teal-300">아이폰은 아직 앱 알림을 받을 수 없어요 — {viewerRole === "guardian" ? "어르신" : "환자"} 마이페이지의 &lsquo;보호자 이메일&rsquo;에 주소를 적어 두면 메일로 받아요.</p>
+              </div>
             </section>
 
             <h2 className="mb-3 text-sm font-semibold text-zinc-600 dark:text-zinc-300">연결된 {viewerRole === "guardian" ? "어르신" : "환자"} {patients.length}명</h2>

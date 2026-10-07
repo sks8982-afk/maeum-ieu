@@ -114,7 +114,8 @@ function GuardianSummary({ d }: { d: Detail }) {
           <p className="text-sm text-zinc-700 dark:text-zinc-200">
             지금까지 <b className="text-red-600 dark:text-red-400">{d.emergency.count}건</b>의 위급 징후가 감지되었어요.
             {d.emergency.lastAt && <> 가장 최근은 <b>{fmt(d.emergency.lastAt)}</b>입니다.</>}
-            {d.emergency.notifiedCount > 0 && <> 이 중 {d.emergency.notifiedCount}건은 보호자에게 알림이 발송되었습니다.</>}
+            {/* "보호자에게 발송되었습니다"는 받은 것처럼 읽혔다 — 앱 알림은 FCM이 받아들인 것까지만 안다(기기 수신은 모름) */}
+            {d.emergency.notifiedCount > 0 && <> 이 중 {d.emergency.notifiedCount}건은 알림을 보냈어요(앱·이메일·메신저 중 한 곳 이상).</>}
           </p>
         ) : (
           <p className="text-sm text-zinc-500">감지된 위급 징후가 없습니다.</p>
@@ -477,7 +478,7 @@ export default function PatientDetailPage() {
 
             <section className="rounded-2xl border border-rose-200 bg-white p-5 dark:border-rose-900/50 dark:bg-zinc-900">
               <h2 className="mb-1 text-sm font-semibold text-rose-700 dark:text-rose-300">🚨 위급 알림 이력 (응급 감지 · 최대 20건)</h2>
-              <p className="mb-3 text-[11px] text-zinc-400">응급(즉시·주의) 신호가 감지된 시각·발화·보호자 알림 발송 여부입니다. <b>일상 대화는 비공개</b>이며, 문제 있는 발화만 표시됩니다.</p>
+              <p className="mb-3 text-[11px] text-zinc-400">응급(즉시·주의) 신호가 감지된 시각·발화·알림 발송 여부입니다. <b>일상 대화는 비공개</b>이며, 문제 있는 발화만 표시됩니다.</p>
               {(!data.emergencies || data.emergencies.length === 0) && <p className="text-xs text-zinc-400">위급 알림 이력이 없습니다.</p>}
               <div className="grid gap-2">
                 {data.emergencies?.map((em, i) => (
@@ -486,7 +487,7 @@ export default function PatientDetailPage() {
                       <span className="text-zinc-400">{new Date(em.at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
                       <span className={`rounded px-1.5 py-0.5 font-bold ${em.level >= 3 ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200" : "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200"}`}>{em.level >= 3 ? "즉시 응급" : "주의"}</span>
                       <span className="font-semibold text-zinc-700 dark:text-zinc-200">{em.category}</span>
-                      <span className={`ml-auto rounded px-1.5 py-0.5 text-[11px] font-medium ${em.notified ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200" : "bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400"}`}>{em.notified ? "보호자 알림 발송됨" : "미발송"}</span>
+                      <span className={`ml-auto rounded px-1.5 py-0.5 text-[11px] font-medium ${em.notified ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200" : "bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400"}`}>{/* "보호자 알림 발송됨"은 틀릴 수 있었다 — 보호자 없이 의사만 연결돼 의사 앱으로만 나가도 이렇게 떴다(재검토) */}{em.notified ? "알림 보냄" : "알림 기록 없음"}</span>
                     </div>
                     {em.utterance && <p className="mt-1.5 rounded-lg bg-white px-2.5 py-1.5 text-[12px] leading-relaxed text-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">“{em.utterance}”</p>}
                   </div>

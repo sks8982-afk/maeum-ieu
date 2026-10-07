@@ -79,6 +79,7 @@ export async function maybeNotifyCognitiveDecline(params: {
     const r = await notifyGuardian({
       userId, userName, messageId: userMsgId, level: 2,
       category: CATEGORY, content, aiReply: "", createdAt: new Date(),
+      realName: false,   // 위 userName 주석의 "실명 미사용" 규칙 — notifyGuardian 기본(실명)을 끈다
     });
     if (!r.sent) return { sent: false, reason: r.reason };
 

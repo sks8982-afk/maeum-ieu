@@ -374,3 +374,88 @@ describe("PII 복호 실패 — 이메일 채널이 말없이 사라지지 않�
     } finally { spy.mockRestore(); }
   });
 });
+
+/**
+ * 알림 문구 — **누구에게 무슨 일이 언제** 생겼는지 알림 한 줄에 보여야 한다(2026-10-07 보호자 앱 푸시 추적).
+ *   예전: "할머니님 — fall_injury. 지금 바로…" — 호출부가 넘긴 호칭(대화 L3는 동반자 호칭, 최후 안전망은 "선생님")과
+ *   카테고리 코드가 그대로 나갔다. 환자가 여럿인 의사는 누군지 몰랐고, 보호자는 무슨 일인지 몰랐다.
+ */
+describe("알림 문구 — 실명·한글 분류·감지 시각", () => {
+  it("앱 푸시: **가린** 실명 + 한글 분류 + 감지 시각, 코드는 내보내지 않는다", async () => {
+    db.user.findUnique.mockResolvedValue({ name: "김영자", guardianWebhookUrl: null, guardianEmail: null, guardianName: null });
+    await notify({ userName: "할머니", category: "fall_injury", createdAt: new Date("2026-10-07T06:12:00Z") });
+    const [ids, msg] = pushMock.mock.calls[0] as unknown as [string[], { body: string; createdAt: Date; patientId: string }];
+    expect(ids).toEqual(["g1"]);
+    expect(msg.body).toContain("김*자님");
+    // 🔒 토픽은 구독 권한 검사가 없다 — 실명을 잠금화면 메시지에 싣지 않는다(재검토)
+    expect(msg.body).not.toContain("김영자");
+    expect(msg.body).toContain("낙상·부상");
+    expect(msg.body).toContain("오후 3:12");        // KST
+    // 🔒 예전 문구 — 호칭과 코드
+    expect(msg.body).not.toContain("할머니님");
+    expect(msg.body).not.toContain("fall_injury");
+    expect(msg.createdAt).toEqual(new Date("2026-10-07T06:12:00Z"));
+    expect(msg.patientId).toMatch(/^u-/);
+  });
+
+  it("실명을 모르면 푸시는 '어르신' — 호칭·호출부 이름을 토픽에 싣지 않는다", async () => {
+    db.user.findUnique.mockResolvedValue({ name: null, guardianWebhookUrl: null, guardianEmail: null, guardianName: null });
+    await notify({ userName: "김응급" });
+    const [, msg] = pushMock.mock.calls[0] as unknown as [string[], { body: string }];
+    expect(msg.body).toContain("어르신님");
+    expect(msg.body).not.toContain("김응급");
+  });
+
+  it("실명 미사용(realName:false — 인지 변화 추세 C2)이면 호출부 호칭을 쓰고, 분류도 추세로 표시한다", async () => {
+    db.user.findUnique.mockResolvedValue({ name: "김영자", guardianWebhookUrl: null, guardianEmail: "g@example.com", guardianName: null });
+    await notify({ userName: "할머니", level: 2, category: "cognitive_decline", realName: false });
+    const [, msg] = pushMock.mock.calls[0] as unknown as [string[], { body: string }];
+    expect(msg.body).toContain("할머니님 — 인지 변화 추세");
+    // 🔒 추세 알림이 "위급 신호"로 나가면 응급처럼 읽힌다(재검토)
+    expect(msg.body).not.toContain("위급 신호");
+    const [, mail] = emailMock.mock.calls[0] as unknown as [string, { userName: string; category: string }];
+    expect(mail.userName).toBe("할머니");
+    expect(mail.category).toBe("인지 변화 추세");
+  });
+
+  it("모르는 분류 코드는 일반 문구로 — 코드를 그대로 보내지 않는다", async () => {
+    db.user.findUnique.mockResolvedValue({ name: "김영자", guardianWebhookUrl: null, guardianEmail: null, guardianName: null });
+    await notify({ category: "new_unknown_category" });
+    const [, msg] = pushMock.mock.calls[0] as unknown as [string[], { body: string }];
+    expect(msg.body).toContain("위급 신호");
+    expect(msg.body).not.toContain("new_unknown_category");
+  });
+
+  it("이메일: 제목·본문용 이름과 분류도 같다", async () => {
+    db.user.findUnique.mockResolvedValue({ name: "김영자", guardianWebhookUrl: null, guardianEmail: "g@example.com", guardianName: null });
+    await notify({ userName: "할머니", category: "suicidal" });
+    const [to, p] = emailMock.mock.calls[0] as unknown as [string, { userName: string; category: string }];
+    expect(to).toBe("g@example.com");
+    expect(p.userName).toBe("김영자");
+    expect(p.category).toBe("자해·자살 위험");
+  });
+
+  it("C2(인지 변화 추세) 호출부는 realName:false를 넘긴다 — 그 파일의 설계 규칙 '실명 미사용'", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync("lib/health/cognitive-alert.ts", "utf-8");
+    const at = src.indexOf("notifyGuardian({");
+    expect(at).toBeGreaterThan(-1);
+    expect(src.slice(at, src.indexOf("});", at))).toMatch(/realName:\s*false/);
+  });
+
+  it.each([
+    ["김영자", "김*자"], ["이수", "이*"], ["남궁민수", "남**수"], ["  박  ", "박"], ["", "어르신"],
+  ])("maskName(%j) → %j", async (input, out) => {
+    const { maskName } = await import("@/lib/chat/emergency-notify");
+    expect(maskName(input)).toBe(out);
+  });
+
+  it("FCM 자격증명이 없어 아예 안 보냈으면 로그를 남긴다 — 연결된 보호자가 있는데 조용히 끝나지 않게", async () => {
+    pushMock.mockResolvedValueOnce({ sent: 0, failed: 0, skipped: "FCM not configured" } as never);
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await notify();
+      expect(spy.mock.calls.some((c) => String(c[0]).includes("fcm skipped"))).toBe(true);
+    } finally { spy.mockRestore(); }
+  });
+});

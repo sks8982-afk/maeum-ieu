@@ -15,6 +15,7 @@ import { toKstDateString } from "@/lib/chat/time";
 import { resolveViewerRole } from "@/lib/roles";
 import { BILLING_ENFORCE } from "@/lib/billing/plans";
 import { getEntitlement } from "@/lib/billing/entitlement";
+import { emergencyCategoryKo } from "@/lib/chat/emergency-labels";
 
 interface DomainRow extends DomainStat { domain: string }
 interface WeekRow { week_start: string; avg_score: number; count: number }
@@ -26,19 +27,6 @@ const DOMAIN_KO: Record<string, string> = {
   language: "언어", judgment: "판단력", attention_calculation: "주의·계산",
 };
 
-// 응급 카테고리 → 보호자용 한글 라벨 (lib/chat/emergency.ts EmergencyCategory와 일치)
-const EMERGENCY_KO: Record<string, string> = {
-  medical_acute: "급성 의학적 위급(호흡·가슴·의식)",
-  fall_injury: "낙상·부상",
-  medication_error: "약물 오남용",
-  suicidal: "자해·자살 위험",
-  bleeding: "출혈",
-  severe_pain: "심한 통증",
-  dizziness_help: "어지럼·도움 요청",
-  weakness_trend: "누적 무기력",
-  appetite_loss: "식욕 저하",
-  sleep_distress: "수면 곤란",
-};
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -317,7 +305,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     const key = (e.emergencyEvidence ?? "").split(":")[0];
     return {
       level: e.emergencyLevel ?? 0,
-      category: EMERGENCY_KO[key] ?? "기타 위급",
+      category: emergencyCategoryKo(key, "기타 위급"),   // 라벨은 알림과 같은 단일 출처(lib/chat/emergency-labels)
       at: e.createdAt.toISOString(),
       notified: e.notifiedAt != null,
       utterance: (e.content ?? "").slice(0, 300), // 응급 당시 어르신 발화(문제 있는 대화만)

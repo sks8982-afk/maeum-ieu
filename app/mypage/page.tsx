@@ -409,13 +409,25 @@ export default function MyPage() {
               <option value="grandchild">손자/손녀</option>
               <option value="other">기타</option>
             </select>
-            <input
-              type="email"
-              placeholder="보호자 이메일 (응급 알림 수신)"
-              value={guardianEmail}
-              onChange={(e) => setGuardianEmail(e.target.value)}
-              className="rounded-xl border border-zinc-200 bg-white px-4 py-3 text-zinc-900 outline-none focus:border-[#007bff] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-            />
+            <div>
+              <input
+                type="email"
+                placeholder="보호자 이메일 (응급 알림 수신)"
+                value={guardianEmail}
+                onChange={(e) => setGuardianEmail(e.target.value)}
+                className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-zinc-900 outline-none focus:border-[#007bff] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+              />
+              {/* 2026-10-07: 이 칸에 이메일만 적으면 보호자 앱으로는 알림이 가지 않는다(앱 알림은 코드 연결이 있어야 함).
+                  역할마다 사실이 다르다 — 알림은 응급이 감지된 **본인 계정**의 이 칸을 쓴다. 보호자·전문가 계정은 대화를 하지 않아
+                  이 칸이 쓰일 일이 없고, 일반인 계정엔 코드 연결 칸이 없다(재검토 지적) */}
+              <p className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500">
+                {screeningMode === "user"
+                  ? <>이 주소로는 이메일만 가요. 보호자가 휴대폰 앱으로도 받으려면 보호자 계정의 코드를 위 &lsquo;보호자·전문가 연결&rsquo;에 입력해 주세요.</>
+                  : screeningMode === "general"
+                  ? "응급 신호가 감지되면 이 주소로 메일이 가요."
+                  : "위급 알림 이메일은 어르신 계정의 마이페이지에서 정해요. 이 계정의 이 칸은 알림에 쓰이지 않아요."}
+              </p>
+            </div>
             <div>
               <input
                 type="url"

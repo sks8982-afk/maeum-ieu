@@ -190,10 +190,14 @@ export async function POST(req: Request) {
       const level = effectiveLevel as 2 | 3;
       const send = async () => {
         try {
-          await notifyGuardian({
+          const r = await notifyGuardian({
             userId, userName: session.user.name || "사용자", messageId: userMsgId, level,
             category: emergency.category, content: text, aiReply: "", createdAt: new Date(),
           });
+          // 결과를 남긴다 — Live와 같게(2026-10-07). 예전엔 버려서, 도움을 청하기 가장 어려운 어르신의
+          //   경로에서 알림이 실제로 나갔는지 로그로도 확인할 수 없었다
+          if (r.sent) console.log("[emergency-notify] observe sent:", r.channels);
+          else console.warn("[emergency-notify] observe not sent:", r.reason);
         } catch (e) { console.error("[observe-notify]", e); }
       };
       try { after(send); } catch { await send(); }

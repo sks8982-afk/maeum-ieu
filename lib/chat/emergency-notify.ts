@@ -16,6 +16,7 @@ import { prisma } from "@/lib/prisma";
 import { sendEmergencyPush } from "@/lib/notify/push-fcm";
 import { sendEmergencyEmail, sendOpsAlert } from "@/lib/notify/email";
 import { decryptPII } from "@/lib/crypto";
+import { emergencyCategoryKo } from "@/lib/chat/emergency-labels";
 import dns from "node:dns/promises";
 
 export interface NotifyPayload {
@@ -28,6 +29,26 @@ export interface NotifyPayload {
   content: string;          // 사용자 발화 원문 (요약본)
   aiReply: string;          // AI 응답 (요약본)
   createdAt: Date;
+  /**
+   * false면 알림에 실명 대신 호출부가 준 userName(호칭)을 쓴다. 기본은 실명(있으면).
+   *   인지 변화 추세(C2)는 "실명 미사용"이 설계 규칙이다(lib/health/cognitive-alert).
+   */
+  realName?: boolean;
+}
+
+/**
+ * 토픽 푸시용 이름 가림 — 김영자→김*자, 이수→이*, 남궁민수→남**수.
+ *
+ * 왜(2026-10-07 재검토): FCM **토픽**은 구독 권한 검사가 없다. 토픽 이름(maeum_<계정 id>)을 아는 기기는
+ *   누구든 구독할 수 있어, 실명·건강 분류가 잠금화면에 그대로 뜨는 메시지를 토픽에 싣는 건 위험하다.
+ *   실명은 수신자가 특정되는 채널(보호자 이메일·메신저 주소)에만 쓰고, 토픽에는 가린 이름을 싣는다.
+ */
+export function maskName(name: string): string {
+  const chars = [...name.trim()];
+  if (chars.length === 0) return "어르신";
+  if (chars.length === 1) return chars[0];
+  if (chars.length === 2) return `${chars[0]}*`;
+  return `${chars[0]}${"*".repeat(chars.length - 2)}${chars[chars.length - 1]}`;
 }
 
 export interface NotifyResult {
@@ -42,7 +63,11 @@ function levelLabel(level: number): string {
   return level === 3 ? "🚨 즉시 응급" : level === 2 ? "⚠️ 주의 필요" : "관찰";
 }
 
-function buildWebhookBody(payload: NotifyPayload): unknown {
+/**
+ * @param who   알림에 쓸 어르신 호칭 — 실명이 있으면 실명(notifyGuardian이 정한다)
+ * @param label 카테고리 한글 라벨. 코드도 괄호로 남긴다(메신저 자동화가 코드를 쓸 수 있어서)
+ */
+function buildWebhookBody(payload: NotifyPayload, who: string, label: string): unknown {
   // Discord-compatible 형식 — Slack/IFTTT/n8n도 content 필드는 공통 처리.
   const lvl = levelLabel(payload.level);
   const title = payload.level === 3
@@ -50,12 +75,12 @@ function buildWebhookBody(payload: NotifyPayload): unknown {
     : `[마음이음] 주의 신호 감지`;
   const body = [
     `${lvl}`,
-    `사용자: ${payload.userName}`,
-    `카테고리: ${payload.category}`,
+    `사용자: ${who}`,
+    `카테고리: ${label} (${payload.category})`,
     `사용자 발화: "${payload.content.slice(0, 200)}"`,
     `AI 응답: "${payload.aiReply.slice(0, 200)}"`,
     `시각: ${payload.createdAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}`,
-    payload.level === 3 ? `\n👉 지금 바로 ${payload.userName}님께 연락하시거나 119에 신고해주세요.` : `\n👉 시간 되실 때 ${payload.userName}님 안부 확인 부탁드립니다.`,
+    payload.level === 3 ? `\n👉 지금 바로 ${who}님께 연락하시거나 119에 신고해주세요.` : `\n👉 시간 되실 때 ${who}님 안부 확인 부탁드립니다.`,
   ].join("\n");
 
   return {
@@ -268,21 +293,35 @@ export async function notifyGuardian(payload: NotifyPayload): Promise<NotifyResu
   // 2) 사용자 보호자 정보 조회
   //    조회 실패를 치명으로 다루지 않는다 — webhook·email은 못 쓰더라도 아래 FCM 경로는
   //    별도 쿼리(ExpertPatient)라 살아 있을 수 있다. 한 쿼리 실패로 전 채널을 버리지 않는다.
-  let user: { guardianWebhookUrl: string | null; guardianEmail: string | null; guardianName: string | null } | null = null;
+  let user: { name: string | null; guardianWebhookUrl: string | null; guardianEmail: string | null; guardianName: string | null } | null = null;
   let lookupFailed = false;   // 조회 실패와 "대상 없음"을 구별하기 위한 플래그
   try {
     user = await prisma.user.findUnique({
       where: { id: payload.userId },
-      select: { guardianWebhookUrl: true, guardianEmail: true, guardianName: true },
+      select: { name: true, guardianWebhookUrl: true, guardianEmail: true, guardianName: true },
     });
   } catch (e) {
     lookupFailed = true;
     console.error("[emergency-notify] 보호자 연락처 조회 실패 — webhook/email 건너뛰고 FCM만 시도:", e instanceof Error ? e.message : e);
   }
 
+  /**
+   * 알림 문구(2026-10-07): **누구에게 무슨 일인지**가 알림 한 줄에 보여야 한다.
+   *   · 이름 — 호출부가 넘기는 userName은 경로마다 다르다(대화 L3는 동반자가 부르는 호칭 "할머니", 최후 안전망은
+   *     "선생님" → "선생님님"). 의사는 환자가 여럿이라 호칭으론 누군지 모른다. 어르신 실명이 있으면 실명.
+   *   · 분류 — 코드("fall_injury")를 그대로 보냈다. 한글 라벨(단일 출처 lib/chat/emergency-labels).
+   *   · 시각 — 폰이 꺼져 있다 늦게 받으면 방금 일처럼 보였다. 본문에 감지 시각.
+   */
+  const realName = payload.realName !== false ? user?.name?.trim() : undefined;
+  const who = realName || payload.userName;
+  // 토픽 푸시: 실명은 가리고(maskName 주석), 실명을 모르면 호칭 대신 "어르신" — 호칭("할머니")·"선생님"은 누군지 못 가린다
+  const pushWho = payload.realName === false ? payload.userName : realName ? maskName(realName) : "어르신";
+  const label = emergencyCategoryKo(payload.category);
+  const when = payload.createdAt.toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul", hour: "numeric", minute: "2-digit" });
+
   // 3) Webhook 발송 (보호자가 URL을 등록한 경우)
   if (user?.guardianWebhookUrl) {
-    const r = await sendWebhook(user.guardianWebhookUrl, buildWebhookBody(payload));
+    const r = await sendWebhook(user.guardianWebhookUrl, buildWebhookBody(payload, who, label));
     if (r.ok) channels.push("webhook");
     else console.warn("[emergency-notify] webhook failed:", r);
   }
@@ -306,16 +345,20 @@ export async function notifyGuardian(payload: NotifyPayload): Promise<NotifyResu
       title: payload.level === 3 ? "🚨 즉시 응급 신호" : "⚠️ 주의 신호",
       body:
         payload.level === 3
-          ? `${payload.userName}님 — ${payload.category}. 지금 바로 연락하시거나 119에 신고해주세요.`
-          : `${payload.userName}님 — ${payload.category}. 안부를 확인해주세요.`,
+          ? `${pushWho}님 — ${label} (${when}). 지금 바로 연락하시거나 119에 신고해주세요.`
+          : `${pushWho}님 — ${label} (${when}). 안부를 확인해주세요.`,
       level: payload.level,
       category: payload.category,
+      createdAt: payload.createdAt,
+      patientId: payload.userId,
     });
     if (push.sent > 0) channels.push("fcm");
     else if (push.failed > 0) console.warn("[emergency-notify] fcm failed:", push);
+    // 자격증명 없음 등으로 **아예 안 보낸** 경우도 남긴다 — 예전엔 연결된 보호자가 있는데도 로그가 없었다
+    else if (push.skipped) console.error("[emergency-notify] fcm skipped — 연결 보호자 앱으로 푸시가 나가지 않음:", push.skipped);
   }
 
-  // 5) 이메일 — 보호자 이메일(암호화 저장)로 발송. RESEND_API_KEY 없으면 skip.
+  // 5) 이메일 — 보호자 이메일(암호화 저장)로 Gmail SMTP 발송. GMAIL_USER·GMAIL_APP_PASSWORD 없으면 skip(lib/notify/email).
   if (user?.guardianEmail) {
     const email = decryptPII(user.guardianEmail);
     /**
@@ -327,9 +370,9 @@ export async function notifyGuardian(payload: NotifyPayload): Promise<NotifyResu
       console.error("[emergency-notify] 🔴 보호자 이메일 복호화 실패 — ENCRYPTION_KEY 확인 필요. 이메일 채널 사용 불가");
     } else if (email) {
       const ok = await sendEmergencyEmail(email, {
-        userName: payload.userName,
+        userName: who,
         level: payload.level,
-        category: payload.category,
+        category: label,          // 메일 본문 "종류" 칸 — 코드 대신 한글 라벨
         createdAt: payload.createdAt,
       });
       if (ok) channels.push("email");

@@ -8,7 +8,8 @@ import { useCallback, useEffect, useRef } from "react";
  *
  * RN WebView 안에서 실행될 때만 동작(window.ReactNativeWebView 존재 시).
  * - 로그인/세션 활성 → { type:"LOGIN_SUCCESS", userId } 전송 → 앱이 maeum_<userId> 토픽 구독
- * - 로그아웃 → { type:"LOGOUT" } 전송 → 앱이 토픽 구독 해제
+ * - **사용자가 로그아웃 버튼을 눌렀을 때만** → { type:"LOGOUT" } (notifyNativeLogout) → 앱이 토픽 구독 해제
+ *   (세션 상태가 "unauthenticated"로 보인다는 것만으로는 보내지 않는다 — bridgeMessageFor 주석)
  * - 앱이 보낸 구매 토큰(PURCHASE_TOKEN)을 서버에 검증 요청 → 완료 시 앱에 마감 신호
  *
  * 왜 구매 검증이 여기 있나: 네이티브 계층에는 로그인 쿠키가 없어 서버가 결제자를 알 수 없다.
@@ -27,6 +28,42 @@ declare global {
 /** 구독 상태가 바뀌었음을 같은 페이지의 다른 컴포넌트에 알리는 이벤트 */
 export const BILLING_UPDATED_EVENT = "maeum:billing-updated";
 
+/**
+ * 세션 상태 → 앱에 보낼 메시지. **로그아웃 신호는 여기서 만들지 않는다.**
+ *
+ * 결함(2026-10-07 보호자 앱 푸시 추적): 상태가 "unauthenticated"면 LOGOUT을 보냈다. 그런데 next-auth는
+ *   세션 조회가 **한 번만 실패해도**(앱으로 돌아오는 순간의 네트워크 끊김·5xx·응답 오류) 세션을 null로,
+ *   즉 unauthenticated로 본다. 그러면 앱이 보호자 휴대폰의 토픽 구독을 끊어, 다시 로그인하거나 앱을
+ *   재시작할 때까지 **위급 알림이 조용히 끊겼다**(화면은 로그인 창으로 갈 뿐 아무 경고도 없다).
+ *   위급 알림은 "확실하지 않으면 구독 유지"가 맞다 → LOGOUT은 로그아웃 버튼에서만(notifyNativeLogout).
+ *   다른 계정으로 로그인하면 앱이 LOGIN_SUCCESS를 받아 이전 구독을 새 계정으로 바꾼다(MaeumApp/App.jsx).
+ *
+ * @returns 보낼 메시지와 기억할 값, 보낼 게 없으면 null
+ */
+export function bridgeMessageFor(
+  status: "authenticated" | "unauthenticated" | "loading",
+  userId: string | undefined,
+  lastSent: string | null,
+): { message: string; sent: string } | null {
+  if (status !== "authenticated" || !userId || lastSent === userId) return null;
+  return { message: JSON.stringify({ type: "LOGIN_SUCCESS", userId }), sent: userId };
+}
+
+/**
+ * 사용자가 **로그아웃 버튼을 눌렀을 때만** 부른다 — 앱이 이 기기의 위급 알림 구독을 끊는다. 일반 브라우저에선 noop.
+ *
+ * ⚠ **signOut이 성공한 뒤에** 부른다(2026-10-07 재검토). 먼저 보내면, 네트워크가 끊기거나 로그아웃 요청이
+ *   실패했을 때 웹은 여전히 로그인 상태인데 앱만 구독을 끊어 — 고치려던 "로그인한 채 알림이 조용히 끊김"이 다시 생긴다.
+ * @param userId 로그아웃하는 계정 — 앱이 저장해 둔 계정을 잃었어도 이 계정의 구독을 정확히 끊을 수 있게(앱 1.2.0+)
+ */
+export function notifyNativeLogout(userId?: string): void {
+  try {
+    window.ReactNativeWebView?.postMessage(JSON.stringify({ type: "LOGOUT", ...(userId ? { userId } : {}) }));
+  } catch {
+    /* 웹뷰 브릿지 오류가 로그아웃을 막지 않게 */
+  }
+}
+
 export function RnBridge() {
   const { data: session, status } = useSession();
   const lastSentRef = useRef<string | null>(null);
@@ -35,18 +72,13 @@ export function RnBridge() {
 
   useEffect(() => {
     const rn = typeof window !== "undefined" ? window.ReactNativeWebView : undefined;
-    if (!rn || status === "loading") return;
-
-    const userId = session?.user?.id;
-    if (status === "authenticated" && userId) {
-      if (lastSentRef.current === userId) return;
-      lastSentRef.current = userId;
-      rn.postMessage(JSON.stringify({ type: "LOGIN_SUCCESS", userId }));
-    } else if (status === "unauthenticated") {
-      if (lastSentRef.current === "__logout__") return;
-      lastSentRef.current = "__logout__";
-      rn.postMessage(JSON.stringify({ type: "LOGOUT" }));
-    }
+    if (!rn) return;
+    // 세션이 끊겨 보이면 기억만 지운다(구독은 유지) — 다시 로그인되면 같은 계정이어도 한 번 더 알린다
+    if (status === "unauthenticated") { lastSentRef.current = null; return; }
+    const next = bridgeMessageFor(status, session?.user?.id, lastSentRef.current);
+    if (!next) return;
+    lastSentRef.current = next.sent;
+    rn.postMessage(next.message);
   }, [status, session?.user?.id]);
 
   const verify = useCallback(async (purchaseToken: string, productId?: string) => {

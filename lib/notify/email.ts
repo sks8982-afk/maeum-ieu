@@ -59,9 +59,11 @@ export async function sendEmergencyEmail(to: string, p: EmergencyEmailPayload): 
   const urgent = p.level === 3;
   const when = p.createdAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
   const subject = `${urgent ? "🚨 즉시 응급" : "⚠️ 주의"} [마음이음] ${p.userName}님 위급 신호`;
+  // ⚠ 이름은 사용자가 정하는 자유 입력이다 — HTML에 넣는 모든 자리에서 이스케이프한다(2026-10-07 재검토:
+  //   여기만 빠져 있어, 이름에 링크 태그를 넣으면 공식 발송 계정 메일에 임의 링크가 실렸다)
   const action = urgent
-    ? `지금 바로 ${p.userName}님께 연락하시거나 119에 신고해주세요.`
-    : `시간 되실 때 ${p.userName}님 안부를 확인해주세요.`;
+    ? `지금 바로 ${esc(p.userName)}님께 연락하시거나 119에 신고해주세요.`
+    : `시간 되실 때 ${esc(p.userName)}님 안부를 확인해주세요.`;
   const accent = urgent ? "#E2547B" : "#E8920C";
   const html = `
   <div style="font-family:'Malgun Gothic',Apple SD Gothic Neo,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#211B2E">
