@@ -52,8 +52,8 @@ process.env.GEMINI_API_KEY = "test-key";
 const { POST } = await import("@/app/api/live/token/route");
 const { GENERAL_NO_COGNITIVE_RULE } = await import("@/lib/chat/prompt");
 
-async function call(body: Record<string, unknown> = { conversationId: "c-1" }) {
-  const res = await POST(new Request("http://localhost/api/live/token", {
+async function call(body: Record<string, unknown> = { conversationId: "c-1" }, post: typeof POST = POST) {
+  const res = await post(new Request("http://localhost/api/live/token", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   }));
   return { status: res.status, body: await res.json() as Record<string, unknown> };
@@ -151,6 +151,7 @@ describe("역할별 세션 지시문 — **발급되는 지시문 자체**를 �
 /**
  * 세션 thinking은 lib/ai/gemini-config를 거친다(2026-10-07 Google 공지 — 다음 세대는 thinkingBudget을 400으로 거부).
  *   오늘 모델(3.1 Live)엔 HEAD(53eb438)와 같은 제약이 실려야 한다 — 첫 오디오 지연을 위해 thinking 0.
+ *   새 세대엔 thinkingConfig를 통째로 뺀다(라우트가 thinkingLevel: null을 넘긴다 — 헬퍼 헤더 매핑표).
  */
 describe("Live 세션 thinking — 모델 세대별 (2026-10-07)", () => {
   it("오늘 모델이면 thinkingBudget 0 그대로, temperature 같은 키는 생기지 않는다", async () => {
@@ -162,6 +163,40 @@ describe("Live 세션 thinking — 모델 세대별 (2026-10-07)", () => {
     // 🔒 키 집합까지 고정 — 헬퍼 결과를 안 펼치면 thinkingConfig가 빠져 첫 오디오가 느려진다(PoC +2.6s)
     expect(Object.keys(constraints.config).sort()).toEqual(
       ["inputAudioTranscription", "outputAudioTranscription", "responseModalities", "systemInstruction", "thinkingConfig"]);
+    expect(constraints.config.thinkingConfig).toStrictEqual({ thinkingBudget: 0 });
+  });
+
+  /** 마지막으로 발급된 토큰의 Live 연결 제약(모델·세션 config) */
+  const issuedConstraints = () => createToken.mock.calls.at(-1)![0].config.liveConnectConstraints as unknown as {
+    model: string; config: Record<string, unknown>;
+  };
+  /** LIVE_MODEL은 라우트 모듈을 읽을 때 한 번 정해진다 — env를 바꾸고 모듈을 **새로 읽어** 그 라우트로 발급한다 */
+  async function callWithLiveModel(liveModel: string) {
+    process.env.LIVE_MODEL = liveModel;
+    try {
+      vi.resetModules();
+      const fresh = await import("@/app/api/live/token/route");
+      return await call(undefined, fresh.POST);
+    } finally {
+      delete process.env.LIVE_MODEL;
+    }
+  }
+
+  it("LIVE_MODEL을 새 세대(gemini-4-flash-live)로 올리면 thinkingConfig가 아예 없다 — thinkingBudget도 thinkingLevel도", async () => {
+    expect((await callWithLiveModel("gemini-4-flash-live")).status).toBe(200);
+    const constraints = issuedConstraints();
+    expect(constraints.model).toBe("gemini-4-flash-live");
+    // 🔒 thinkingBudget은 다음 세대가 400으로 거부하고, 수준은 하나를 고르면 어느 Live 모델이 거부한다
+    //   (3.8 Live: thinkingLevel 미지원 / 3.8 Live Extended Thinking: minimal 거부) — 그래서 아무것도 싣지 않는다
+    expect(Object.keys(constraints.config).sort()).toEqual(
+      ["inputAudioTranscription", "outputAudioTranscription", "responseModalities", "systemInstruction"]);
+    expect(JSON.stringify(constraints)).not.toMatch(/thinkingBudget|thinkingConfig|thinkingLevel/);
+  });
+
+  it("같은 재로딩 경로로 오늘 모델을 명시하면 thinkingBudget 0 그대로 (빠진 건 모델 세대 때문이다)", async () => {
+    expect((await callWithLiveModel("gemini-3.1-flash-live-preview")).status).toBe(200);
+    const constraints = issuedConstraints();
+    expect(constraints.model).toBe("gemini-3.1-flash-live-preview");
     expect(constraints.config.thinkingConfig).toStrictEqual({ thinkingBudget: 0 });
   });
 });

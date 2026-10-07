@@ -169,10 +169,11 @@ ${cognitiveGuide}
             outputAudioTranscription: {},
             // PoC: thinking 미제한 시 첫 오디오 +2.6s — Live 경로에선 0이 정상 작동(3.1에서도 검증)
             //   예산 0은 ≤3.8 모델에만 실린다. 3.9+·4+·별칭은 thinkingBudget을 400으로 거부하므로 헬퍼가
-            //   '사고 없음'에 해당하는 thinkingLevel "minimal"로 바꾼다(lib/ai/gemini-config). ⚠ 모델마다 다르다:
-            //   3.8 Live는 thinkingLevel 자체를, 3.8 Live Extended Thinking은 minimal을 받지 않는다(문서) —
-            //   LIVE_MODEL을 바꿀 땐 그 모델의 지원표부터 확인하고 실기기로 첫 오디오 지연을 재측정할 것.
-            ...geminiTuning(LIVE_MODEL, { thinkingBudget: 0, thinkingLevel: "minimal" }),
+            //   thinkingConfig를 **통째로 뺀다**(null — lib/ai/gemini-config). 수준을 하나 고르면 어느 Live 모델에선
+            //   거부된다: 3.8 Live는 thinkingLevel 자체를, 3.8 Live Extended Thinking은 minimal을 받지 않는다(문서).
+            //   생략 = 그 모델의 기본 수준(3.1 Flash Live는 minimal) — LIVE_MODEL을 바꿀 땐 그 모델의 기본 수준을
+            //   확인하고 실기기로 첫 오디오 지연을 재측정할 것.
+            ...geminiTuning(LIVE_MODEL, { thinkingBudget: 0, thinkingLevel: null }),
           },
         },
         httpOptions: { apiVersion: "v1alpha" },

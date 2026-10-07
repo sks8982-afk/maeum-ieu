@@ -8,6 +8,8 @@
  * 방식: 정규식이 아니라 TypeScript 구문 트리로 본다 — 주석·문자열 속 "temperature:"는 무시되고,
  *   객체 리터럴 키(축약형 포함)와 `cfg.temperature = …` 같은 사후 대입을 잡는다. 스캐너가 공허하지 않은지는
  *   아래 '스캐너 자체 검증'이 고정한다(정규식 게이트가 아무것도 못 잡던 사고를 반복하지 않으려고).
+ * 같은 구문 트리로 헬퍼 호출부가 적은 **새 모델용 thinkingLevel 리터럴**도 고정한다(텍스트 경로 low · Live null) —
+ *   단위 테스트의 호출부 표는 사본이라, 실제 호출부가 바뀌어도 녹색이었다.
  */
 import { describe, it, expect } from "vitest";
 import ts from "typescript";
@@ -33,6 +35,14 @@ const ROUTED_FILES: Record<string, number> = {
   "lib/health/mental-scorer.ts": 1,
   "lib/screening/exam-runner.ts": 1,
 };
+
+/**
+ * 새 모델용 thinkingLevel — 호출부가 헬퍼 두 번째 인자에 **리터럴로** 적는 값(헬퍼 헤더 매핑표). 타입은 넷 다
+ *   허용하므로 tsc는 못 막는다. 실패를 삼키는 텍스트 경로는 전부 "low"(3.7/3.8 Flash가 minimal을 400으로 거부 →
+ *   조용히 멈춘다), Live 토큰만 null(수준을 하나 고르면 거부하는 Live 모델이 있다 → thinkingConfig 생략).
+ */
+const LIVE_ROUTE = "app/api/live/token/route.ts";
+const expectedLevel = (file: string): string | null => (file === LIVE_ROUTE ? null : "low");
 
 function listSources(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
@@ -86,6 +96,32 @@ function countHelperCalls(fileName: string, text: string): number {
   return n;
 }
 
+/** 객체 리터럴에서 키의 값 식 — 객체 리터럴이 아니거나 `키: 값` 꼴이 없으면 undefined(축약형은 리터럴이 아니다) */
+function propValue(obj: ts.Expression | undefined, key: string): ts.Expression | undefined {
+  if (!obj || !ts.isObjectLiteralExpression(obj)) return undefined;
+  for (const p of obj.properties) {
+    if (ts.isPropertyAssignment(p) && keyName(p.name) === key) return p.initializer;
+  }
+  return undefined;
+}
+
+/** 헬퍼 호출마다 두 번째 인자의 thinkingLevel — 문자열 리터럴이면 그 값, null이면 null, 그 밖은 "<리터럴 아님: 원문>" */
+function helperLevels(fileName: string, text: string): (string | null)[] {
+  const sf = parse(fileName, text);
+  const levels: (string | null)[] = [];
+  const visit = (node: ts.Node): void => {
+    if (isHelperCall(node)) {
+      const v = propValue(node.arguments[1], "thinkingLevel");
+      if (v && ts.isStringLiteralLike(v)) levels.push(v.text);
+      else if (v?.kind === ts.SyntaxKind.NullKeyword) levels.push(null);
+      else levels.push(`<리터럴 아님: ${(v ?? node.arguments[1] ?? node).getText(sf)}>`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return levels;
+}
+
 describe("스캐너 자체 검증 — 공허한 게이트가 아니다", () => {
   it("헬퍼를 건너뛴 리터럴은 키마다 잡는다", () => {
     const raw = `ai.models.generateContent({ model, config: { temperature: 0, maxOutputTokens: 9, thinkingConfig: { thinkingBudget: 64 } } });`;
@@ -116,6 +152,18 @@ describe("스캐너 자체 검증 — 공허한 게이트가 아니다", () => {
     ].join("\n");
     expect(findRawTuningKeys("z.tsx", ok)).toEqual([]);
   });
+
+  it("헬퍼 호출마다 thinkingLevel 리터럴을 읽고, 리터럴이 아니면 원문을 드러낸다", () => {
+    const src = [
+      `const a = { ...geminiTuning(m, { thinkingBudget: 64, thinkingLevel: "low" }), maxOutputTokens: 1024 };`,
+      `const b = { ...geminiTuning(m, { thinkingBudget: 0, thinkingLevel: null }) };`,
+      `const c = geminiTuning(m, { thinkingLevel: lvl });`,
+      `const d = geminiTuning(m, opts);`,
+      `const e = geminiTuning(m, { thinkingLevel });`,
+    ].join("\n");
+    expect(helperLevels("s.ts", src)).toEqual(
+      ["low", null, "<리터럴 아님: lvl>", "<리터럴 아님: opts>", "<리터럴 아님: { thinkingLevel }>"]);
+  });
 });
 
 describe("app/·lib/ — Gemini 샘플링·thinking 키는 헬퍼 안에서만", () => {
@@ -135,5 +183,17 @@ describe("app/·lib/ — Gemini 샘플링·thinking 키는 헬퍼 안에서만",
   it.each(Object.entries(ROUTED_FILES))("%s — 헬퍼 호출 %i곳", (file, expected) => {
     // 🔒 줄면: 그 호출부가 헬퍼를 떼고 샘플링·thinking을 아예 안 보내게 됐다(오늘 요청이 바뀐다)
     expect(countHelperCalls(file, readFileSync(file, "utf-8"))).toBe(expected);
+  });
+});
+
+describe("새 모델용 thinkingLevel — 호출부 소스에 적힌 리터럴 (텍스트 경로 low · Live null)", () => {
+  it("Live 라우트가 대상에 있다 (null 기대가 공허하지 않게)", () => {
+    expect(Object.keys(ROUTED_FILES)).toContain(LIVE_ROUTE);
+  });
+
+  it.each(Object.entries(ROUTED_FILES))("%s", (file, calls) => {
+    // 🔒 텍스트 경로에 minimal: 3.7/3.8 Flash가 400 → 응급 백스톱 null·분석기 degraded로 조용히 멈춘다.
+    //   Live에 수준을 넣으면: 3.8 Live(thinkingLevel 미지원)·3.8 Live Extended Thinking(minimal 거부)이 거부한다.
+    expect(helperLevels(file, readFileSync(file, "utf-8"))).toEqual(Array(calls).fill(expectedLevel(file)));
   });
 });
