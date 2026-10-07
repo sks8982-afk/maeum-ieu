@@ -41,12 +41,22 @@ docs/리포트_*.md
 
 # env files (can opt-in for committing if needed)
 .env*
+# 예시 파일은 추적한다 — 자리표시자만 둔다(실제 키·주소·비밀번호 금지, 2026-10-08)
+!.env.example
+
+# bkit 플러그인 로컬 상태·감사 로그(세션 기록 — 저장소에 올리지 않는다, 2026-10-08)
+.bkit/
 
 # GCP service account credentials (DO NOT commit — contains private key)
 .gcp-credentials.json
 *-credentials.json
 gcp-key*.json
 vertex-key*.json
+
+# FCM 서비스 계정 키 — 공개 저장소에 올리면 안 된다(개인 키가 들어 있다). 빠른 발송 시험용 service-account.json,
+#   Firebase 콘솔이 내려 주는 <프로젝트>-firebase-adminsdk-….json(2026-10-08)
+service-account*.json
+*firebase-adminsdk*.json
 
 # vercel
 .vercel
