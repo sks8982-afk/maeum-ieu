@@ -11,6 +11,7 @@
  *   흉내내고, 응답("{}")은 쓰기 경로에 닿기 전에 끝나도록 골랐다.
  * 기대값: HEAD 소스의 config 리터럴을 그대로 옮겼다. 스키마·안전설정·시그널처럼 이번 변경이 건드리지 않은
  *   객체는 모양만 본다(expect.any / objectContaining).
+ *   예외 1곳(의도한 변경): 정신건강 분류 maxOutputTokens 64→256 — 그 테스트의 주석 참고.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -72,6 +73,8 @@ beforeEach(() => {
 });
 
 describe("동반자 getTextModel — HEAD 그대로", () => {
+  // thinkingBudget 512 = COMPANION_THINKING_BUDGET 기본값. gemini-config-contract의 ENV_BUDGET_DEFAULT가 이 값을
+  //   빌려 thinking 여유 불변식을 본다(env 예산은 소스에서 못 읽는다) — 기본값을 바꾸면 둘 다 바꿀 것.
   const base = {
     temperature: 0.7, maxOutputTokens: 2048, thinkingConfig: { thinkingBudget: 512 },
     safetySettings: SAFETY, tools: undefined, abortSignal: SIGNAL,
@@ -197,12 +200,15 @@ describe("나머지 호출부 — HEAD 리터럴 그대로", () => {
     });
   });
 
-  it("정신건강 답변 분류 (정규식이 못 잡는 답만 LLM)", async () => {
+  it("정신건강 답변 분류 (정규식이 못 잡는 답만 LLM) — maxOutputTokens만 64→256(의도한 변경)", async () => {
     await classifyAnswer("글쎄, 그게 어떻다고 해야 할지");
     const [c] = expectCalls(1);
     expect(c.model).toBe("gemini-2.5-flash");
     expect(c.config).toStrictEqual({
-      temperature: 0, maxOutputTokens: 64, responseMimeType: "application/json", responseSchema: SCHEMA,
+      // ⚠ HEAD(53eb438)는 maxOutputTokens 64. maxOutputTokens는 thinking을 포함해서 예산 64와 같은 상한으론
+      //   JSON이 잘렸다 — 2026-10-07 실측: LLM 경로 답 7개 중 5개가 -1(재질문, thinking 34~53·출력 0~6토큰).
+      //   256으로 올린 것만 다르고 나머지 키·값(thinkingBudget 64 포함)은 HEAD 그대로다.
+      temperature: 0, maxOutputTokens: 256, responseMimeType: "application/json", responseSchema: SCHEMA,
       thinkingConfig: { thinkingBudget: 64 }, safetySettings: SAFETY,
     });
   });

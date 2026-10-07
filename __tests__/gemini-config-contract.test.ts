@@ -10,6 +10,7 @@
  *   아래 '스캐너 자체 검증'이 고정한다(정규식 게이트가 아무것도 못 잡던 사고를 반복하지 않으려고).
  * 같은 구문 트리로 헬퍼 호출부가 적은 **새 모델용 thinkingLevel 리터럴**도 고정한다(텍스트 경로 low · Live null) —
  *   단위 테스트의 호출부 표는 사본이라, 실제 호출부가 바뀌어도 녹색이었다.
+ * 그리고 오늘 세대에 싣는 예산의 여유 불변식: maxOutputTokens ≥ thinkingBudget + 128(라우팅된 호출부 전부).
  */
 import { describe, it, expect } from "vitest";
 import ts from "typescript";
@@ -43,6 +44,20 @@ const ROUTED_FILES: Record<string, number> = {
  */
 const LIVE_ROUTE = "app/api/live/token/route.ts";
 const expectedLevel = (file: string): string | null => (file === LIVE_ROUTE ? null : "low");
+
+/**
+ * 오늘 세대(≤3.8)의 thinking 여유 — maxOutputTokens는 thinking 토큰을 **포함**한다(문서 "including thought
+ *   tokens"). 예산만큼 생각하고도 답(JSON)을 끝까지 쓸 몫이 남아야 한다. 정신건강 분류가 64/64로 보내다가
+ *   2026-10-07 실측에서 LLM 경로 답 7개 중 5개를 잘린 JSON으로 잃었다(-1 → 재질문).
+ *   새 모델(thinkingLevel)엔 토큰 예산이 없어 이 불변식이 닿지 않는다 — 헬퍼 헤더 '불확실한 것' 참고.
+ */
+const MIN_OUTPUT_HEADROOM = 128;
+/**
+ * 예산을 env로 정하는 호출부 — 소스에서 값을 읽을 수 없어 기본값을 적는다. 이 기본값은 실요청 캡처
+ *   (gemini-config-callsites '동반자 getTextModel': thinkingBudget 512)가 고정한다 — 바꾸면 둘 다 바꿀 것.
+ *   ⚠ env(COMPANION_THINKING_BUDGET)로 1921 이상을 주면 이 불변식 밖이다(maxOutputTokens 2048).
+ */
+const ENV_BUDGET_DEFAULT: Record<string, number> = { "lib/chat/llm.ts": 512 };
 
 function listSources(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
@@ -122,6 +137,59 @@ function helperLevels(fileName: string, text: string): (string | null)[] {
   return levels;
 }
 
+type Headroom = { at: string; budget: number | string; maxOutputTokens: number | string };
+
+/** 헬퍼 결과가 펼쳐지는 config 객체 — `{ ...geminiTuning(…) }`, 또는 `const t = geminiTuning(…)` 뒤 같은 함수의 `{ ...t }` 전부 */
+function configsOf(call: ts.CallExpression): ts.ObjectLiteralExpression[] {
+  const p = call.parent;
+  if (ts.isSpreadAssignment(p) && ts.isObjectLiteralExpression(p.parent)) return [p.parent];
+  if (!ts.isVariableDeclaration(p) || !ts.isIdentifier(p.name)) return [];
+  const name = p.name.text;
+  let scope: ts.Node = p;
+  while (!ts.isFunctionLike(scope) && !ts.isSourceFile(scope)) scope = scope.parent;
+  const found: ts.ObjectLiteralExpression[] = [];
+  const visit = (n: ts.Node): void => {
+    if (ts.isObjectLiteralExpression(n) && n.properties.some((q) =>
+      ts.isSpreadAssignment(q) && ts.isIdentifier(q.expression) && q.expression.text === name)) found.push(n);
+    ts.forEachChild(n, visit);
+  };
+  visit(scope);
+  return found;
+}
+
+/**
+ * 헬퍼 호출마다 (오늘 세대에 싣는 thinkingBudget, 그 결과가 펼쳐진 config의 maxOutputTokens) 쌍.
+ *   maxOutputTokens가 없으면 Infinity(모델 기본 상한 — Live). 숫자로 읽을 수 없는 값은 원문 문자열로 남긴다.
+ */
+function thinkingHeadroom(fileName: string, text: string): Headroom[] {
+  const sf = parse(fileName, text);
+  const rows: Headroom[] = [];
+  const visit = (node: ts.Node): void => {
+    if (isHelperCall(node)) {
+      const at = `${fileName}:${sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1}`;
+      const b = propValue(node.arguments[1], "thinkingBudget");
+      const budget = b === undefined ? "<thinkingBudget 없음>"
+        : ts.isNumericLiteral(b) ? Number(b.text)
+        : ENV_BUDGET_DEFAULT[fileName] ?? b.getText(sf);
+      const configs = configsOf(node);
+      if (configs.length === 0) rows.push({ at, budget, maxOutputTokens: "<config를 못 찾음>" });
+      for (const c of configs) {
+        const m = propValue(c, "maxOutputTokens");
+        rows.push({ at, budget, maxOutputTokens: m === undefined ? Infinity : ts.isNumericLiteral(m) ? Number(m.text) : m.getText(sf) });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return rows;
+}
+
+/** 불변식 위반 — 숫자로 못 읽었거나 maxOutputTokens < thinkingBudget + 128 */
+const headroomViolations = (rows: Headroom[]): string[] => rows
+  .filter((r) => typeof r.budget !== "number" || typeof r.maxOutputTokens !== "number"
+    || r.maxOutputTokens < r.budget + MIN_OUTPUT_HEADROOM)
+  .map((r) => `${r.at} thinkingBudget=${r.budget} maxOutputTokens=${r.maxOutputTokens}`);
+
 describe("스캐너 자체 검증 — 공허한 게이트가 아니다", () => {
   it("헬퍼를 건너뛴 리터럴은 키마다 잡는다", () => {
     const raw = `ai.models.generateContent({ model, config: { temperature: 0, maxOutputTokens: 9, thinkingConfig: { thinkingBudget: 64 } } });`;
@@ -164,6 +232,40 @@ describe("스캐너 자체 검증 — 공허한 게이트가 아니다", () => {
     expect(helperLevels("s.ts", src)).toEqual(
       ["low", null, "<리터럴 아님: lvl>", "<리터럴 아님: opts>", "<리터럴 아님: { thinkingLevel }>"]);
   });
+
+  it("thinking 여유 — 직접 펼침·변수 경유·상한 없음·읽을 수 없는 값을 호출부마다 읽고, 위반을 고른다", () => {
+    const src = [
+      `const a = { ...geminiTuning(m, { thinkingBudget: 64, thinkingLevel: "low" }), maxOutputTokens: 64 };`,
+      `function f() {`,
+      `  const t = geminiTuning(m, { thinkingBudget: 512, thinkingLevel: "low" });`,
+      `  return [{ ...t, maxOutputTokens: 2048 }, { x: 1, ...t, maxOutputTokens: 600 }];`,
+      `}`,
+      `const c = { ...geminiTuning(m, { thinkingBudget: 0, thinkingLevel: null }) };`,
+      `const d = { ...geminiTuning(m, { thinkingBudget: B, thinkingLevel: "low" }), maxOutputTokens: MAX };`,
+      `const e = { ...geminiTuning(m, { thinkingLevel: "low" }), maxOutputTokens: 1024 };`,
+      `use(geminiTuning(m, { thinkingBudget: 1, thinkingLevel: "low" }));`,
+      `const g = { ...geminiTuning(m, { thinkingBudget: 64, thinkingLevel: "low" }), maxOutputTokens: 192 };`,
+    ].join("\n");
+    const rows = thinkingHeadroom("h.ts", src);
+    expect(rows).toEqual([
+      { at: "h.ts:1", budget: 64, maxOutputTokens: 64 },
+      { at: "h.ts:3", budget: 512, maxOutputTokens: 2048 },
+      { at: "h.ts:3", budget: 512, maxOutputTokens: 600 },
+      { at: "h.ts:6", budget: 0, maxOutputTokens: Infinity },
+      { at: "h.ts:7", budget: "B", maxOutputTokens: "MAX" },
+      { at: "h.ts:8", budget: "<thinkingBudget 없음>", maxOutputTokens: 1024 },
+      { at: "h.ts:9", budget: 1, maxOutputTokens: "<config를 못 찾음>" },
+      { at: "h.ts:10", budget: 64, maxOutputTokens: 192 },
+    ]);
+    // 64+128=192는 경계 — 통과. 상한 없음(Live)도 통과
+    expect(headroomViolations(rows)).toEqual([
+      "h.ts:1 thinkingBudget=64 maxOutputTokens=64",
+      "h.ts:3 thinkingBudget=512 maxOutputTokens=600",
+      "h.ts:7 thinkingBudget=B maxOutputTokens=MAX",
+      "h.ts:8 thinkingBudget=<thinkingBudget 없음> maxOutputTokens=1024",
+      "h.ts:9 thinkingBudget=1 maxOutputTokens=<config를 못 찾음>",
+    ]);
+  });
 });
 
 describe("app/·lib/ — Gemini 샘플링·thinking 키는 헬퍼 안에서만", () => {
@@ -195,5 +297,20 @@ describe("새 모델용 thinkingLevel — 호출부 소스에 적힌 리터럴 (
     // 🔒 텍스트 경로에 minimal: 3.7/3.8 Flash가 400 → 응급 백스톱 null·분석기 degraded로 조용히 멈춘다.
     //   Live에 수준을 넣으면: 3.8 Live(thinkingLevel 미지원)·3.8 Live Extended Thinking(minimal 거부)이 거부한다.
     expect(helperLevels(file, readFileSync(file, "utf-8"))).toEqual(Array(calls).fill(expectedLevel(file)));
+  });
+});
+
+describe("오늘 세대 thinking 여유 — maxOutputTokens ≥ thinkingBudget + 128 (라우팅된 호출부 전부)", () => {
+  const rows = Object.keys(ROUTED_FILES).flatMap((f) => thinkingHeadroom(f, readFileSync(f, "utf-8")));
+
+  it("라우팅된 파일 전부에서 헬퍼 호출마다 쌍을 읽었다 (빈 목록으로 녹색이 되지 않게)", () => {
+    expect(new Set(rows.map((r) => r.at.split(":")[0]))).toEqual(new Set(Object.keys(ROUTED_FILES)));
+    expect(new Set(rows.map((r) => r.at)).size).toBe(Object.values(ROUTED_FILES).reduce((a, b) => a + b, 0));
+  });
+
+  it("thinkingBudget + 128 ≤ maxOutputTokens", () => {
+    // 🔒 maxOutputTokens는 thinking을 포함한다 — 걸린 호출부는 예산만큼 생각하다 상한에 닿아 답이 잘린다.
+    //   JSON 호출부는 파싱 실패를 삼켜 조용히 품질만 떨어진다(정신건강 분류 64/64: 2026-10-07 실측 7개 중 5개 -1).
+    expect(headroomViolations(rows)).toEqual([]);
   });
 });

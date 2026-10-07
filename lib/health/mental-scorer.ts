@@ -104,10 +104,14 @@ export async function classifyAnswer(answer: string, answerType: "freq4" | "agre
     const res = await getGenAI().models.generateContent({
       model,
       contents: `${cfg.prompt}\nJSON {"score": n} 만 출력.\n\n답변: ${answer.slice(0, 200)}`,
-      // ⚠ maxOutputTokens(64)는 thinking을 포함한다. 예산 64는 ≤3.8 모델에만 실리고, 3.9+·4+·별칭은
-      //   thinkingLevel "low"(lib/ai/gemini-config — 토큰 상한이 아님)가 된다 → 그 모델로 바꿀 땐 64를 반드시
-      //   올리고 실측할 것. 안 그러면 thinking이 출력을 다 먹어 JSON이 잘리고, 분류 -1(재질문)이 반복된다.
-      config: { ...geminiTuning(model, { temperature: 0, thinkingBudget: 64, thinkingLevel: "low" }), maxOutputTokens: 64, responseMimeType: "application/json", responseSchema: SCHEMA, safetySettings: COMPANION_SAFETY_SETTINGS },
+      // ⚠ maxOutputTokens는 thinking을 포함한다(문서 "including thought tokens"). 예전 64는 예산(64)과 같아서
+      //   thinking이 상한을 거의 다 먹고 JSON이 잘렸다 — 2026-10-07 실측(모호한 답 8개, freq4): LLM 경로 7개 중
+      //   5개가 -1(재질문). 오류는 "Unterminated string in JSON"·"Unexpected end of JSON input"·"No number after
+      //   minus sign", "Here is the JSON req…"로 시작한 응답 1건 / usage: thinking 34~53, 출력 0~6토큰.
+      //   256 = 예산 64 + 출력 몫(불변식 maxOutputTokens ≥ thinkingBudget + 128 — __tests__/gemini-config-contract).
+      //   예산 64는 ≤3.8 모델에만 실리고, 3.9+·4+·별칭은 thinkingLevel "low"(lib/ai/gemini-config — 토큰 상한이
+      //   아님)가 된다 → 그 모델로 바꿀 땐 이 상한 안에서 JSON이 안 잘리는지 다시 실측할 것.
+      config: { ...geminiTuning(model, { temperature: 0, thinkingBudget: 64, thinkingLevel: "low" }), maxOutputTokens: 256, responseMimeType: "application/json", responseSchema: SCHEMA, safetySettings: COMPANION_SAFETY_SETTINGS },
     });
     logUsage("mental-classify", res);
     const parsed = JSON.parse((res.text ?? "").trim()) as { score?: number };
