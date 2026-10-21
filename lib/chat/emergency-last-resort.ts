@@ -66,7 +66,7 @@ export async function lastResortEmergency(params: {
   if (!content) return { fired: false, level: 0, skipped: "no-content" };
 
   /**
-   * 정규식 → (none이면) LLM 백스톱. 본류 evaluateEmergency와 같은 2단 구성이다.
+   * 정규식 → (L2 미만이면) LLM 백스톱. 본류 evaluateEmergency와 같은 2단 구성이다.
    *
    * ⚠ 2026-10-02 적대 리뷰 지적: 1차 구현은 detectEmergency만 썼다. 그런데 백스톱이 존재하는
    *   이유가 바로 "정규식이 놓치는 사투리·완곡어 과소감지 꼬리"이고, 안전망은 **그 꼬리가 가장
@@ -75,12 +75,13 @@ export async function lastResortEmergency(params: {
    *   백스톱은 DB를 쓰지 않으므로(Gemini 호출뿐) RDS 장애 경로에서도 동작한다 —
    *   이 모듈의 'DB 안 친다' 원칙과 충돌하지 않는다. 실패하면 null이라 더 나빠지지도 않는다.
    */
+  //   (2026-10-19) L1(관찰)도 백스톱에 태운다 — 본류(detectWithBackstop)와 같다. L1 뒤의 급성 신호를 놓치지 않게.
   let result = detectEmergency(content);
-  if (result.level === 0) {
+  if (result.level < 2) {
     const llm = await detectEmergencyLLM(content).catch(() => null);
     if (llm) {
+      console.log(`[last-resort] 정규식 L${result.level} → LLM 백스톱이 응급 포착:`, llm.category);
       result = llm;
-      console.log("[last-resort] 정규식 none → LLM 백스톱이 응급 포착:", llm.category);
     }
   }
   if (result.level < minLevel) return { fired: false, level: result.level, skipped: "below-threshold" };

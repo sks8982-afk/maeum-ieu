@@ -133,6 +133,19 @@ describe("텍스트 날짜·시간 단락이 백스톱 응급을 삼키지 않�
     expect(llmCalls).toEqual([]);
   });
 
+  it("정규식 L1인 시간 질문은 게이트에서 백스톱을 부르지 않는다 — 본류에서 한 번만(2026-10-19)", async () => {
+    const L1_TIME = "지금 몇 시야? 기운이 하나도 없고 숨이 너무 차";
+    expect(isDateTimeQuestion(L1_TIME)).toBe(true);
+    expect(detectEmergency(L1_TIME).level).toBe(1);
+    backstop.mockImplementation(async () => ({ level: 3, category: "medical_acute", evidence: "llm-backstop" }));
+    const r = await say(L1_TIME);
+    expect(r.status).toBe(200);
+    expect(String(r.body.text)).not.toMatch(/한국 시각으로/);
+    // 🔒 게이트가 detectWithBackstop(L1에서도 LLM을 부름)을 쓰면 결과를 바꿀 수 없는 헛호출로 응답 전 블로킹이 두 번이 된다
+    expect(backstop).toHaveBeenCalledTimes(1);
+    expect(llmCalls).toEqual([]);
+  });
+
   it("평범한 시간 질문은 그대로 즉답한다 (백스톱 none)", async () => {
     const r = await say("지금 몇 시야?");
     expect(r.status).toBe(200);

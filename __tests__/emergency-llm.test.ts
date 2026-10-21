@@ -163,3 +163,13 @@ describe("호출 설정 — 비용·정확도에 직결되는 파라미터 고�
     expect(cfg.maxOutputTokens).toBeGreaterThan(cfg.thinkingConfig.thinkingBudget * 2);
   });
 });
+
+describe("점·쉼표 띄어쓰기 — 사전필터를 정규식과 같은 정규화로 본다(2026-10-19)", () => {
+  it("'..'로 띄운 '숨이..너무..차'도 LLM을 부른다", async () => {
+    generateContent.mockResolvedValue(reply({ category: "medical_acute", level: 3 }));
+    const r = await detect("숨이..너무..차");
+    // 🔒 정규화 없이 보면 '.'이 사전필터의 숨 갈래를 끊어 호출 자체가 없다(노인 문자 말투 "숨이..차..")
+    expect(generateContent).toHaveBeenCalledTimes(1);
+    expect(r?.level).toBe(3);
+  });
+});

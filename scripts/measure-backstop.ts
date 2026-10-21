@@ -1,12 +1,12 @@
 /**
  * 백스톱 발화율·지연 실측 (A) — 실제 user 발화 로그 대상.
- *   - 발화율: 정규식 none + 사전필터 통과(=백스톱 호출)가 전체 user 발화의 몇 %인지, before/after 비교
+ *   - 발화율: 정규식 L2 미만(none·L1) + 사전필터 통과(=백스톱 호출)가 전체 user 발화의 몇 %인지, before/after 비교
  *   - 지연: 실제 트리거되는 발화 일부에 detectEmergencyLLM을 호출해 왕복 시간 측정
  * 실행: npx tsx scripts/measure-backstop.ts
  */
 import "dotenv/config";
 import { prisma } from "../lib/prisma";
-import { detectEmergency } from "../lib/chat/emergency";
+import { detectEmergency, normalizeForBackstop } from "../lib/chat/emergency";
 import { detectEmergencyLLM, SOFT_SIGNAL } from "../lib/chat/emergency-llm";
 
 // 변경 전(a0f7f87) 트리거 — 발화율 절감 효과 비교용
@@ -22,17 +22,17 @@ async function main() {
   const msgs = rows.map(r => (r.content || "").trim()).filter(t => t.length > 0);
   const total = msgs.length;
 
-  let regexCaught = 0;     // fast 정규식이 직접 잡음(level>0) — 백스톱 불필요
-  let fireNew = 0;          // 현재: 정규식 none + 새 트리거 → 백스톱 호출
-  let fireOld = 0;          // 이전: 정규식 none + 옛 트리거 → 백스톱 호출
+  let regexCaught = 0;     // fast 정규식이 직접 잡음(level≥2) — 백스톱 불필요
+  let fireNew = 0;          // 현재: 정규식 L2 미만(none·L1, 2026-10-19부터) + 새 트리거 → 백스톱 호출
+  let fireOld = 0;          // 이전: 정규식 L2 미만 + 옛 트리거 → 백스톱 호출
   const newlyFiring: string[] = [];   // 새로 트리거되는 발화(샘플)
   const dropped: string[] = [];       // 옛날엔 트리거됐으나 이제 skip되는 발화(샘플)
 
   for (const t of msgs) {
     const lvl = detectEmergency(t).level;
-    if (lvl > 0) { regexCaught++; continue; }
+    if (lvl >= 2) { regexCaught++; continue; }
     const oldHit = OLD_SOFT.test(t);
-    const newHit = SOFT_SIGNAL.test(t);
+    const newHit = SOFT_SIGNAL.test(normalizeForBackstop(t)); // 운영(detectEmergencyLLM)과 같은 정규화
     if (newHit) { fireNew++; if (newlyFiring.length < 6) newlyFiring.push(t); }
     if (oldHit) fireOld++;
     if (oldHit && !newHit && dropped.length < 12) dropped.push(t);

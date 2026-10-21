@@ -33,13 +33,16 @@ export interface EmergencyEvaluation {
 }
 
 /**
- * 1단계 — 정규식 → (none이면) LLM 백스톱. **DB를 치지 않는다**.
+ * 1단계 — 정규식 → (L2 미만이면) LLM 백스톱. **DB를 치지 않는다**.
  *   정규식이 놓친 과소감지 꼬리(사투리·완곡어·어순 변형)를 백스톱이 잡는다.
- *   정규식이 none일 때만 + 사전필터 통과 시에만 LLM 호출(평범한 대화는 비용·지연 0).
+ *   정규식이 L2 미만일 때만 + 사전필터 통과 시에만 LLM 호출(평범한 대화는 비용·지연 0).
+ *   ⚠ (2026-10-19) 예전엔 none일 때만 불렀다. 그래서 "기운이 하나도 없고 숨이 너무 차"·"입맛이 하나도 없고 피를 토했어"처럼
+ *   앞의 L1(관찰) 표현이 잡히면 뒤의 급성 신호가 있어도 백스톱이 아예 안 불렸다(독립 검토). 백스톱은 L2 이상만 돌려주므로
+ *   L1을 태워도 올리기만 하고, 백스톱이 아니라고 하면 L1을 그대로 둔다(누적 승격은 2단계가 그대로 한다).
  */
 export async function detectWithBackstop(userContent: string): Promise<EmergencyResult> {
   const result = detectEmergency(userContent);
-  if (result.level !== 0) return result;
+  if (result.level >= 2) return result;
   return (await detectEmergencyLLM(userContent)) ?? result;
 }
 

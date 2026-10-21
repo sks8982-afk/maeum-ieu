@@ -129,7 +129,7 @@ export async function POST(req: Request) {
     observed = text;
     if (!text) return NextResponse.json({ ok: true, skipped: true, reason: "empty" });
 
-    // 응급 감지 — 정규식 우선, none이면 LLM 백스톱(DB 미사용). **STT 신뢰도 게이트보다 먼저** 한다.
+    // 응급 감지 — 정규식 우선, L2 미만이면 LLM 백스톱(DB 미사용). **STT 신뢰도 게이트보다 먼저** 한다.
     const emergency = await detectWithBackstop(text);
 
     /**

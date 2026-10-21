@@ -116,7 +116,8 @@ async function main() {
   for (const [u, expect] of cases) {
     let d = detectEmergency(u);
     let via = "정규식";
-    if (d.level === 0) {
+    // 본류(detectWithBackstop)와 같게 — 정규식이 L2 미만(none·L1)이면 백스톱(2026-10-19)
+    if (d.level < 2) {
       const llm = await detectEmergencyLLM(u);
       if (llm) { d = llm; via = "LLM 백스톱"; }
     }

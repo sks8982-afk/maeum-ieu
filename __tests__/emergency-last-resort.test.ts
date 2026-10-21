@@ -220,3 +220,14 @@ describe("LLM 백스톱을 안전망에서도 쓴다", () => {
     await expect(run({ userId: "u1", text: "조용히 갈란다" })).resolves.toMatchObject({ fired: false });
   });
 });
+
+describe("(E) L1(관찰)도 백스톱에 태운다 — 본류 detectWithBackstop과 같다(2026-10-19)", () => {
+  it("정규식 L1이어도 백스톱이 L3면 발동한다", async () => {
+    detectEmergencyLLM.mockResolvedValue({ level: 3, category: "medical_acute", evidence: "llm" });
+    const r = await run({ userId: "u1", text: "기운이 하나도 없고 숨이 너무 차" });
+    // 🔒 L1에서 멈추면 앞의 '기운 없음'이 뒤의 급성 호흡곤란 신호를 가린다
+    expect(detectEmergencyLLM).toHaveBeenCalledTimes(1);
+    expect(r.fired).toBe(true);
+    expect(r.level).toBe(3);
+  });
+});

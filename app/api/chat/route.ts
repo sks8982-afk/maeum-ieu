@@ -31,7 +31,7 @@ import { classifyProvisional, assessCoverage } from "@/lib/screening/exam-eval";
 import { detectInappropriate, buildModerationReply, isPastResolvedSelfHarm, buildPastSelfHarmReply } from "@/lib/chat/moderation";
 import { detectEmergency, buildEmergencyL3Reply, type EmergencyResult } from "@/lib/chat/emergency";
 import { detectEmergencyLLM } from "@/lib/chat/emergency-llm";
-import { evaluateEmergency, detectWithBackstop } from "@/lib/chat/emergency-evaluate";
+import { evaluateEmergency } from "@/lib/chat/emergency-evaluate";
 import { evaluateSttConfidence, buildClarificationReply } from "@/lib/chat/stt-confidence";
 import { buildSttHints } from "@/lib/chat/stt-hints";
 import { correctTranscriptionByContext } from "@/lib/chat/stt-context-correction";
@@ -1535,7 +1535,7 @@ export async function POST(req: Request) {
         const spoken = isAudio && sttPromise ? await sttPromise.catch(() => "") : (lastUserMessage ?? "");
         /**
          * ⚠ 정규식만 보면 안 된다(2026-10-02 적대 리뷰). 본류 평가(evaluateEmergency)는
-         *   정규식이 none일 때 LLM 백스톱(detectEmergencyLLM)을 한 번 더 태우는데, 이 게이트는
+         *   정규식이 L2 미만일 때 LLM 백스톱(detectEmergencyLLM)을 한 번 더 태우는데, 이 게이트는
          *   정규식만 봐서 **백스톱이 잡아내던 사투리·완곡어 L3가 여기서 마무리 인사로 덮였다.**
          *   백스톱이 존재하는 이유가 바로 "정규식이 놓치는 과소감지 꼬리"인데, 하필 그 꼬리가
          *   한도 초과일에 묵살되면 가장 조용한 위음성이 된다.
@@ -1578,9 +1578,12 @@ export async function POST(req: Request) {
     //   "지금 몇 시야? 모아둔 약 오늘 다 털어 넣을 거야"(정규식 none · 백스톱 L3)가 시각 안내 한 줄로
     //   끝났다 — 음성 경로는 이미 effectiveLevel(백스톱 포함)을 봐서 두 경로가 어긋나 있었다.
     //   비용: 백스톱은 SOFT_SIGNAL 사전필터를 통과한 발화에서만 LLM을 부른다(평범한 시간 질문은 0).
+    //   ⚠ 정규식이 L1 이상이면 백스톱 없이 바로 일반 경로로 — detectWithBackstop은 L1에서도 LLM을 부르는데(2026-10-19),
+    //   L1은 0이 될 수 없어 이 게이트에서는 헛호출이고 본류(evaluateEmergency)가 한 번 더 부른다(블로킹 2회).
     if (!isAudio && lastUserMessage && isDateTimeQuestion(lastUserMessage)
       && detectInappropriate(lastUserMessage).category === "ok"
-      && (await detectWithBackstop(lastUserMessage)).level === 0) {
+      && detectEmergency(lastUserMessage).level === 0
+      && !(await detectEmergencyLLM(lastUserMessage).catch(() => null))) {
       return handleDateTimeQuestion(lastUserMessage, honorific, conversationId, userId, ctx?.currentTime);
     }
 
