@@ -59,7 +59,10 @@ export const ModelName = {
   VerificationToken: 'VerificationToken',
   Conversation: 'Conversation',
   Message: 'Message',
-  Subscription: 'Subscription'
+  Subscription: 'Subscription',
+  BillingPayment: 'BillingPayment',
+  BillingConsent: 'BillingConsent',
+  BillingWebhookEvent: 'BillingWebhookEvent'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -204,11 +207,77 @@ export const SubscriptionScalarFieldEnum = {
   expiresAt: 'expiresAt',
   verifiedAt: 'verifiedAt',
   revokedAt: 'revokedAt',
+  provider: 'provider',
+  payMethod: 'payMethod',
+  priceKrw: 'priceKrw',
+  dailyTurnLimit: 'dailyTurnLimit',
+  billingKeyEnc: 'billingKeyEnc',
+  anchorDay: 'anchorDay',
+  cycleNo: 'cycleNo',
+  nextChargeAt: 'nextChargeAt',
+  nextScheduleId: 'nextScheduleId',
+  cancelAtPeriodEnd: 'cancelAtPeriodEnd',
+  failedChargeCount: 'failedChargeCount',
+  canceledAt: 'canceledAt',
+  cancelType: 'cancelType',
+  renewalNoticeFor: 'renewalNoticeFor',
+  freeTurnLimit: 'freeTurnLimit',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const
 
 export type SubscriptionScalarFieldEnum = (typeof SubscriptionScalarFieldEnum)[keyof typeof SubscriptionScalarFieldEnum]
+
+
+export const BillingPaymentScalarFieldEnum = {
+  paymentId: 'paymentId',
+  subscriptionId: 'subscriptionId',
+  purchaserUserId: 'purchaserUserId',
+  cycleNo: 'cycleNo',
+  kind: 'kind',
+  attempt: 'attempt',
+  amountKrw: 'amountKrw',
+  payMethod: 'payMethod',
+  billingKeyHash: 'billingKeyHash',
+  status: 'status',
+  periodStart: 'periodStart',
+  periodEnd: 'periodEnd',
+  scheduledAt: 'scheduledAt',
+  paidAt: 'paidAt',
+  cancelledKrw: 'cancelledKrw',
+  refundTargetKrw: 'refundTargetKrw',
+  failureReason: 'failureReason',
+  receiptUrl: 'receiptUrl',
+  paidMailAt: 'paidMailAt',
+  cancelType: 'cancelType',
+  cancelRequestedAt: 'cancelRequestedAt',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type BillingPaymentScalarFieldEnum = (typeof BillingPaymentScalarFieldEnum)[keyof typeof BillingPaymentScalarFieldEnum]
+
+
+export const BillingConsentScalarFieldEnum = {
+  id: 'id',
+  userId: 'userId',
+  subscriptionId: 'subscriptionId',
+  termsVersion: 'termsVersion',
+  items: 'items',
+  offer: 'offer',
+  createdAt: 'createdAt'
+} as const
+
+export type BillingConsentScalarFieldEnum = (typeof BillingConsentScalarFieldEnum)[keyof typeof BillingConsentScalarFieldEnum]
+
+
+export const BillingWebhookEventScalarFieldEnum = {
+  webhookId: 'webhookId',
+  type: 'type',
+  receivedAt: 'receivedAt'
+} as const
+
+export type BillingWebhookEventScalarFieldEnum = (typeof BillingWebhookEventScalarFieldEnum)[keyof typeof BillingWebhookEventScalarFieldEnum]
 
 
 export const SortOrder = {
@@ -224,6 +293,14 @@ export const JsonNullValueInput = {
 } as const
 
 export type JsonNullValueInput = (typeof JsonNullValueInput)[keyof typeof JsonNullValueInput]
+
+
+export const NullableJsonNullValueInput = {
+  DbNull: DbNull,
+  JsonNull: JsonNull
+} as const
+
+export type NullableJsonNullValueInput = (typeof NullableJsonNullValueInput)[keyof typeof NullableJsonNullValueInput]
 
 
 export const QueryMode = {

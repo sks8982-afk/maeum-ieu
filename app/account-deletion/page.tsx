@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { PUSH_DEVICE_SCOPE, SUBSCRIPTION_SCOPE } from "@/lib/privacy-scopes";
+import {
+  PG_CONSENT_SCOPE, PG_PAYMENT_SCOPE, PG_SUBSCRIPTION_SCOPE, PUSH_DEVICE_SCOPE, SUBSCRIPTION_SCOPE,
+} from "@/lib/privacy-scopes";
 
 /**
  * 계정·데이터 삭제 안내 (/account-deletion) — Google Play 데이터 안전성 '계정 삭제 URL' 요구사항.
@@ -17,6 +19,11 @@ import { PUSH_DEVICE_SCOPE, SUBSCRIPTION_SCOPE } from "@/lib/privacy-scopes";
  *     기록은 Google Play에 남는다. 출시 가이드의 데이터 안전성 "구매 기록" 설명도 같은 범위다(docs/playstore/README_출시가이드.md 3절).
  *   (12차) 휴대폰 등록 정보·구독 기록의 범위는 lib/privacy-scopes(PUSH_DEVICE_SCOPE·SUBSCRIPTION_SCOPE)에서 가져온다 — 개인정보처리방침
  *     1·7항·출시 가이드의 데이터 안전성 설명과 같은 문자열이다(__tests__/account-deletion-page.test.ts가 셋을 맞대어 본다).
+ *   (2026-10-22 웹 결제 — 포트원 월 이용권) 구독 기록에 웹 결제 항목(PG_SUBSCRIPTION_SCOPE)이 더해졌다 — 같은 행이라 계정과 함께 지워진다.
+ *     결제 내역(BillingPayment)·결제 동의 기록(BillingConsent)은 FK가 없어 **계정을 지워도 남는다** — 전자상거래법 시행령 제6조 5년
+ *     보존(scripts/ops-billing-pg.ts). 그래서 "법령상 별도 보관 의무가 있는 데이터는 없습니다"를 지우고 5년 보관을 적는다.
+ *     계정을 지우기 전에 운영자가 웹 이용권을 정리한다(scripts/ops-billing-settle-user.ts — 결제한 분은 지금 해지 기준 환불, 혜택 받는 분이면
+ *     위약금 없는 환불). 앱 안에서도 열리는 안내라 웹 결제 화면 링크는 두지 않는다(Play 결제 정책 — 사실 고지만).
  */
 export const metadata = { title: "계정 삭제 · 마음이음" };
 
@@ -57,18 +64,27 @@ export default function AccountDeletionPage() {
             <li>목소리 등록 정보(목소리 특징값·성문)와 상시 감시 기록</li>
             <li>위급 알림을 받는 휴대폰 등록 정보({PUSH_DEVICE_SCOPE} — 보호자·의사 계정)</li>
             <li>
-              구독 기록(Google Play 구독 확인 결과 — {SUBSCRIPTION_SCOPE}). 결제한 계정과 혜택을 받는 계정 중
-              어느 쪽을 삭제해도 그 구독 기록은 함께 삭제됩니다.
+              구독 기록(Google Play 구독 확인 결과 — {SUBSCRIPTION_SCOPE}). 웹에서 결제한 월 이용권은 웹 결제 항목({PG_SUBSCRIPTION_SCOPE})도
+              함께 삭제됩니다. 결제한 계정과 혜택을 받는 계정 중 어느 쪽을 삭제해도 그 구독 기록은 함께 삭제됩니다.
             </li>
           </ul>
           <p className="mt-2 leading-relaxed">
             요청이 처리되면 위 데이터는 모두 <b>영구 삭제</b>되며 복구할 수 없습니다. 원본 음성은 애초에 저장하지
-            않습니다. 관련 법령상 별도 보관 의무가 있는 데이터는 없습니다.
+            않습니다.
           </p>
           <p className="mt-2 leading-relaxed">
-            <b>구독 중이라면 먼저 해지해 주세요.</b> 구독 결제는 Google Play에서 이루어지며, 서비스는 결제 수단·결제 금액을
-            저장하지 않습니다 — 결제·환불 처리 기록은 Google Play에 남고, 서비스에는 위 구독 기록(환불·강제 해지 시각 포함)만
-            남습니다. 계정을 삭제해도 Google Play 정기 결제는 해지되지 않으니, Google Play 앱 → 결제 및 정기 결제 → 정기
+            <b>법령에 따라 남기는 기록</b>: 웹에서 월 이용권을 결제했다면 결제 내역({PG_PAYMENT_SCOPE})과 결제 동의 기록({PG_CONSENT_SCOPE})은
+            「전자상거래 등에서의 소비자보호에 관한 법률」에 따라 계정을 삭제한 뒤에도 5년 동안 다른 정보와 분리해 보관한 뒤 파기합니다.
+            그 밖에 법령상 따로 보관하는 데이터는 없습니다.
+          </p>
+          <p className="mt-2 leading-relaxed">
+            웹에서 결제한 월 이용권이 남아 있으면 계정을 삭제하기 전에 해지합니다 — 결제한 분의 계정이면 지금 해지 기준으로, 혜택을 받는 분의
+            계정이면 위약금 없이 이용한 날짜만큼만 빼고 결제한 분께 결제 취소로 환불하며, 환불을 마친 뒤 삭제합니다.
+          </p>
+          <p className="mt-2 leading-relaxed">
+            <b>Google Play로 구독 중이라면 먼저 해지해 주세요.</b> Google Play 구독 결제는 Google Play에서 이루어지며, 서비스는 그
+            결제 수단·결제 금액을 저장하지 않습니다 — 결제·환불 처리 기록은 Google Play에 남고, 서비스에는 위 구독 기록(환불·강제 해지
+            시각 포함)만 남습니다. 계정을 삭제해도 Google Play 정기 결제는 해지되지 않으니, Google Play 앱 → 결제 및 정기 결제 → 정기
             결제에서 마음이음 구독을 해지해 주세요.
           </p>
         </Section>

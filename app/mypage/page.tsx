@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { ThemeToggle } from "../theme-toggle";
 import { LogoutButton } from "../LogoutButton";
 import MedicationEditor from "../components/MedicationEditor";
+import { SubscriptionManageLink } from "../components/SubscriptionManageLink";
 import { appAlertLabel, type AppAlertState } from "@/lib/push/app-alert-label";
 import { flagOn } from "@/lib/flags";
 
@@ -267,6 +268,8 @@ export default function MyPage() {
                   {screeningMode === "guardian" ? "👨‍👩‍👧 가족 상태 보기 →" : "🩺 환자 관리 페이지 열기 →"}
                 </Link>
               )}
+              {/* 웹 결제 이용권·결제 내역이 있는 결제회원에게만, 브라우저에서만(SubscriptionManageLink 주석) */}
+              <SubscriptionManageLink className="mt-2 block rounded-xl border border-zinc-300 bg-white px-3 py-2 text-center text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700" />
               {/* 목소리 등록(화자식별) — 베타. 어르신 본인 계정만: 서버가 동의한 어르신만 등록·대조를 받는다
                   (app/api/voiceprint). 다른 역할에 보이면 30초 낭독을 다 마친 뒤에야 403을 받는다. */}
               {screeningMode === "user" && (

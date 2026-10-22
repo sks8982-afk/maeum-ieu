@@ -7,6 +7,7 @@ import { ThemeToggle } from "../theme-toggle";
 import { BrandLogo, CompanyLogo } from "../BrandLogo";
 import { LATEST_APP_VERSION, isOlderVersion } from "@/lib/app-version";
 import { AppDownload } from "./AppDownload";
+import { loginReturnPath } from "./return-path";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -62,7 +63,8 @@ export default function LoginPage() {
       if (remember) localStorage.setItem("savedEmail", email);
       else localStorage.removeItem("savedEmail");
       // 역할별 랜딩은 홈(/)이 서버에서 결정 — pro는 /expert, 그 외 /chat. /chat 깜빡임 방지.
-      window.location.href = "/";
+      //   구독 화면에서 온 로그인(callbackUrl=/subscribe)만 그리로 돌아간다(return-path 주석)
+      window.location.href = loginReturnPath(new URLSearchParams(window.location.search).get("callbackUrl"), window.location.origin);
     } finally {
       setLoading(false);
     }

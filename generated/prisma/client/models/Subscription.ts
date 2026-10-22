@@ -25,13 +25,38 @@ import type * as Prisma from "../internal/prismaNamespace"
  * 
  * ⚠️ 신규 테이블 생성은 prisma db push 금지(raw 테이블 drop 사고 이력)
  * — scripts/ops-create-subscription.ts + prisma generate.
+ * 
+ * 웹 PG 정기결제(포트원, 2026-10-22): 같은 표에 provider='portone' 행으로 둔다(혜택 판정 한 곳 — lib/billing/entitlement).
+ * 포트원 행은 purchaseToken = "portone:{issueId}", productId = 요금제 id(lib/billing/portone-plans).
+ * 추가 컬럼은 모두 nullable·기본값이라 기존 Play 행에는 영향이 없다 — scripts/ops-billing-pg.ts(추가만) + prisma generate.
+ * 결제 원장·동의 기록은 이 표가 아니라 BillingPayment·BillingConsent에 둔다(이 표는 User 삭제에 Cascade라 5년 보존을 못 한다).
  */
 export type SubscriptionModel = runtime.Types.Result.DefaultSelection<Prisma.$SubscriptionPayload>
 
 export type AggregateSubscription = {
   _count: SubscriptionCountAggregateOutputType | null
+  _avg: SubscriptionAvgAggregateOutputType | null
+  _sum: SubscriptionSumAggregateOutputType | null
   _min: SubscriptionMinAggregateOutputType | null
   _max: SubscriptionMaxAggregateOutputType | null
+}
+
+export type SubscriptionAvgAggregateOutputType = {
+  priceKrw: number | null
+  dailyTurnLimit: number | null
+  anchorDay: number | null
+  cycleNo: number | null
+  failedChargeCount: number | null
+  freeTurnLimit: number | null
+}
+
+export type SubscriptionSumAggregateOutputType = {
+  priceKrw: number | null
+  dailyTurnLimit: number | null
+  anchorDay: number | null
+  cycleNo: number | null
+  failedChargeCount: number | null
+  freeTurnLimit: number | null
 }
 
 export type SubscriptionMinAggregateOutputType = {
@@ -44,6 +69,21 @@ export type SubscriptionMinAggregateOutputType = {
   expiresAt: Date | null
   verifiedAt: Date | null
   revokedAt: Date | null
+  provider: string | null
+  payMethod: string | null
+  priceKrw: number | null
+  dailyTurnLimit: number | null
+  billingKeyEnc: string | null
+  anchorDay: number | null
+  cycleNo: number | null
+  nextChargeAt: Date | null
+  nextScheduleId: string | null
+  cancelAtPeriodEnd: boolean | null
+  failedChargeCount: number | null
+  canceledAt: Date | null
+  cancelType: string | null
+  renewalNoticeFor: Date | null
+  freeTurnLimit: number | null
   createdAt: Date | null
   updatedAt: Date | null
 }
@@ -58,6 +98,21 @@ export type SubscriptionMaxAggregateOutputType = {
   expiresAt: Date | null
   verifiedAt: Date | null
   revokedAt: Date | null
+  provider: string | null
+  payMethod: string | null
+  priceKrw: number | null
+  dailyTurnLimit: number | null
+  billingKeyEnc: string | null
+  anchorDay: number | null
+  cycleNo: number | null
+  nextChargeAt: Date | null
+  nextScheduleId: string | null
+  cancelAtPeriodEnd: boolean | null
+  failedChargeCount: number | null
+  canceledAt: Date | null
+  cancelType: string | null
+  renewalNoticeFor: Date | null
+  freeTurnLimit: number | null
   createdAt: Date | null
   updatedAt: Date | null
 }
@@ -72,11 +127,44 @@ export type SubscriptionCountAggregateOutputType = {
   expiresAt: number
   verifiedAt: number
   revokedAt: number
+  provider: number
+  payMethod: number
+  priceKrw: number
+  dailyTurnLimit: number
+  billingKeyEnc: number
+  anchorDay: number
+  cycleNo: number
+  nextChargeAt: number
+  nextScheduleId: number
+  cancelAtPeriodEnd: number
+  failedChargeCount: number
+  canceledAt: number
+  cancelType: number
+  renewalNoticeFor: number
+  freeTurnLimit: number
   createdAt: number
   updatedAt: number
   _all: number
 }
 
+
+export type SubscriptionAvgAggregateInputType = {
+  priceKrw?: true
+  dailyTurnLimit?: true
+  anchorDay?: true
+  cycleNo?: true
+  failedChargeCount?: true
+  freeTurnLimit?: true
+}
+
+export type SubscriptionSumAggregateInputType = {
+  priceKrw?: true
+  dailyTurnLimit?: true
+  anchorDay?: true
+  cycleNo?: true
+  failedChargeCount?: true
+  freeTurnLimit?: true
+}
 
 export type SubscriptionMinAggregateInputType = {
   id?: true
@@ -88,6 +176,21 @@ export type SubscriptionMinAggregateInputType = {
   expiresAt?: true
   verifiedAt?: true
   revokedAt?: true
+  provider?: true
+  payMethod?: true
+  priceKrw?: true
+  dailyTurnLimit?: true
+  billingKeyEnc?: true
+  anchorDay?: true
+  cycleNo?: true
+  nextChargeAt?: true
+  nextScheduleId?: true
+  cancelAtPeriodEnd?: true
+  failedChargeCount?: true
+  canceledAt?: true
+  cancelType?: true
+  renewalNoticeFor?: true
+  freeTurnLimit?: true
   createdAt?: true
   updatedAt?: true
 }
@@ -102,6 +205,21 @@ export type SubscriptionMaxAggregateInputType = {
   expiresAt?: true
   verifiedAt?: true
   revokedAt?: true
+  provider?: true
+  payMethod?: true
+  priceKrw?: true
+  dailyTurnLimit?: true
+  billingKeyEnc?: true
+  anchorDay?: true
+  cycleNo?: true
+  nextChargeAt?: true
+  nextScheduleId?: true
+  cancelAtPeriodEnd?: true
+  failedChargeCount?: true
+  canceledAt?: true
+  cancelType?: true
+  renewalNoticeFor?: true
+  freeTurnLimit?: true
   createdAt?: true
   updatedAt?: true
 }
@@ -116,6 +234,21 @@ export type SubscriptionCountAggregateInputType = {
   expiresAt?: true
   verifiedAt?: true
   revokedAt?: true
+  provider?: true
+  payMethod?: true
+  priceKrw?: true
+  dailyTurnLimit?: true
+  billingKeyEnc?: true
+  anchorDay?: true
+  cycleNo?: true
+  nextChargeAt?: true
+  nextScheduleId?: true
+  cancelAtPeriodEnd?: true
+  failedChargeCount?: true
+  canceledAt?: true
+  cancelType?: true
+  renewalNoticeFor?: true
+  freeTurnLimit?: true
   createdAt?: true
   updatedAt?: true
   _all?: true
@@ -159,6 +292,18 @@ export type SubscriptionAggregateArgs<ExtArgs extends runtime.Types.Extensions.I
   /**
    * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
    * 
+   * Select which fields to average
+  **/
+  _avg?: SubscriptionAvgAggregateInputType
+  /**
+   * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+   * 
+   * Select which fields to sum
+  **/
+  _sum?: SubscriptionSumAggregateInputType
+  /**
+   * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+   * 
    * Select which fields to find the minimum value
   **/
   _min?: SubscriptionMinAggregateInputType
@@ -189,6 +334,8 @@ export type SubscriptionGroupByArgs<ExtArgs extends runtime.Types.Extensions.Int
   take?: number
   skip?: number
   _count?: SubscriptionCountAggregateInputType | true
+  _avg?: SubscriptionAvgAggregateInputType
+  _sum?: SubscriptionSumAggregateInputType
   _min?: SubscriptionMinAggregateInputType
   _max?: SubscriptionMaxAggregateInputType
 }
@@ -203,9 +350,26 @@ export type SubscriptionGroupByOutputType = {
   expiresAt: Date | null
   verifiedAt: Date
   revokedAt: Date | null
+  provider: string
+  payMethod: string | null
+  priceKrw: number | null
+  dailyTurnLimit: number | null
+  billingKeyEnc: string | null
+  anchorDay: number | null
+  cycleNo: number
+  nextChargeAt: Date | null
+  nextScheduleId: string | null
+  cancelAtPeriodEnd: boolean
+  failedChargeCount: number
+  canceledAt: Date | null
+  cancelType: string | null
+  renewalNoticeFor: Date | null
+  freeTurnLimit: number | null
   createdAt: Date
   updatedAt: Date
   _count: SubscriptionCountAggregateOutputType | null
+  _avg: SubscriptionAvgAggregateOutputType | null
+  _sum: SubscriptionSumAggregateOutputType | null
   _min: SubscriptionMinAggregateOutputType | null
   _max: SubscriptionMaxAggregateOutputType | null
 }
@@ -238,6 +402,21 @@ export type SubscriptionWhereInput = {
   expiresAt?: Prisma.DateTimeNullableFilter<"Subscription"> | Date | string | null
   verifiedAt?: Prisma.DateTimeFilter<"Subscription"> | Date | string
   revokedAt?: Prisma.DateTimeNullableFilter<"Subscription"> | Date | string | null
+  provider?: Prisma.StringFilter<"Subscription"> | string
+  payMethod?: Prisma.StringNullableFilter<"Subscription"> | string | null
+  priceKrw?: Prisma.IntNullableFilter<"Subscription"> | number | null
+  dailyTurnLimit?: Prisma.IntNullableFilter<"Subscription"> | number | null
+  billingKeyEnc?: Prisma.StringNullableFilter<"Subscription"> | string | null
+  anchorDay?: Prisma.IntNullableFilter<"Subscription"> | number | null
+  cycleNo?: Prisma.IntFilter<"Subscription"> | number
+  nextChargeAt?: Prisma.DateTimeNullableFilter<"Subscription"> | Date | string | null
+  nextScheduleId?: Prisma.StringNullableFilter<"Subscription"> | string | null
+  cancelAtPeriodEnd?: Prisma.BoolFilter<"Subscription"> | boolean
+  failedChargeCount?: Prisma.IntFilter<"Subscription"> | number
+  canceledAt?: Prisma.DateTimeNullableFilter<"Subscription"> | Date | string | null
+  cancelType?: Prisma.StringNullableFilter<"Subscription"> | string | null
+  renewalNoticeFor?: Prisma.DateTimeNullableFilter<"Subscription"> | Date | string | null
+  freeTurnLimit?: Prisma.IntNullableFilter<"Subscription"> | number | null
   createdAt?: Prisma.DateTimeFilter<"Subscription"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"Subscription"> | Date | string
   purchaser?: Prisma.XOR<Prisma.UserScalarRelationFilter, Prisma.UserWhereInput>
@@ -254,6 +433,21 @@ export type SubscriptionOrderByWithRelationInput = {
   expiresAt?: Prisma.SortOrderInput | Prisma.SortOrder
   verifiedAt?: Prisma.SortOrder
   revokedAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  provider?: Prisma.SortOrder
+  payMethod?: Prisma.SortOrderInput | Prisma.SortOrder
+  priceKrw?: Prisma.SortOrderInput | Prisma.SortOrder
+  dailyTurnLimit?: Prisma.SortOrderInput | Prisma.SortOrder
+  billingKeyEnc?: Prisma.SortOrderInput | Prisma.SortOrder
+  anchorDay?: Prisma.SortOrderInput | Prisma.SortOrder
+  cycleNo?: Prisma.SortOrder
+  nextChargeAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  nextScheduleId?: Prisma.SortOrderInput | Prisma.SortOrder
+  cancelAtPeriodEnd?: Prisma.SortOrder
+  failedChargeCount?: Prisma.SortOrder
+  canceledAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  cancelType?: Prisma.SortOrderInput | Prisma.SortOrder
+  renewalNoticeFor?: Prisma.SortOrderInput | Prisma.SortOrder
+  freeTurnLimit?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   purchaser?: Prisma.UserOrderByWithRelationInput
@@ -273,6 +467,21 @@ export type SubscriptionWhereUniqueInput = Prisma.AtLeast<{
   expiresAt?: Prisma.DateTimeNullableFilter<"Subscription"> | Date | string | null
   verifiedAt?: Prisma.DateTimeFilter<"Subscription"> | Date | string
   revokedAt?: Prisma.DateTimeNullableFilter<"Subscription"> | Date | string | null
+  provider?: Prisma.StringFilter<"Subscription"> | string
+  payMethod?: Prisma.StringNullableFilter<"Subscription"> | string | null
+  priceKrw?: Prisma.IntNullableFilter<"Subscription"> | number | null
+  dailyTurnLimit?: Prisma.IntNullableFilter<"Subscription"> | number | null
+  billingKeyEnc?: Prisma.StringNullableFilter<"Subscription"> | string | null
+  anchorDay?: Prisma.IntNullableFilter<"Subscription"> | number | null
+  cycleNo?: Prisma.IntFilter<"Subscription"> | number
+  nextChargeAt?: Prisma.DateTimeNullableFilter<"Subscription"> | Date | string | null
+  nextScheduleId?: Prisma.StringNullableFilter<"Subscription"> | string | null
+  cancelAtPeriodEnd?: Prisma.BoolFilter<"Subscription"> | boolean
+  failedChargeCount?: Prisma.IntFilter<"Subscription"> | number
+  canceledAt?: Prisma.DateTimeNullableFilter<"Subscription"> | Date | string | null
+  cancelType?: Prisma.StringNullableFilter<"Subscription"> | string | null
+  renewalNoticeFor?: Prisma.DateTimeNullableFilter<"Subscription"> | Date | string | null
+  freeTurnLimit?: Prisma.IntNullableFilter<"Subscription"> | number | null
   createdAt?: Prisma.DateTimeFilter<"Subscription"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"Subscription"> | Date | string
   purchaser?: Prisma.XOR<Prisma.UserScalarRelationFilter, Prisma.UserWhereInput>
@@ -289,11 +498,28 @@ export type SubscriptionOrderByWithAggregationInput = {
   expiresAt?: Prisma.SortOrderInput | Prisma.SortOrder
   verifiedAt?: Prisma.SortOrder
   revokedAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  provider?: Prisma.SortOrder
+  payMethod?: Prisma.SortOrderInput | Prisma.SortOrder
+  priceKrw?: Prisma.SortOrderInput | Prisma.SortOrder
+  dailyTurnLimit?: Prisma.SortOrderInput | Prisma.SortOrder
+  billingKeyEnc?: Prisma.SortOrderInput | Prisma.SortOrder
+  anchorDay?: Prisma.SortOrderInput | Prisma.SortOrder
+  cycleNo?: Prisma.SortOrder
+  nextChargeAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  nextScheduleId?: Prisma.SortOrderInput | Prisma.SortOrder
+  cancelAtPeriodEnd?: Prisma.SortOrder
+  failedChargeCount?: Prisma.SortOrder
+  canceledAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  cancelType?: Prisma.SortOrderInput | Prisma.SortOrder
+  renewalNoticeFor?: Prisma.SortOrderInput | Prisma.SortOrder
+  freeTurnLimit?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   _count?: Prisma.SubscriptionCountOrderByAggregateInput
+  _avg?: Prisma.SubscriptionAvgOrderByAggregateInput
   _max?: Prisma.SubscriptionMaxOrderByAggregateInput
   _min?: Prisma.SubscriptionMinOrderByAggregateInput
+  _sum?: Prisma.SubscriptionSumOrderByAggregateInput
 }
 
 export type SubscriptionScalarWhereWithAggregatesInput = {
@@ -309,6 +535,21 @@ export type SubscriptionScalarWhereWithAggregatesInput = {
   expiresAt?: Prisma.DateTimeNullableWithAggregatesFilter<"Subscription"> | Date | string | null
   verifiedAt?: Prisma.DateTimeWithAggregatesFilter<"Subscription"> | Date | string
   revokedAt?: Prisma.DateTimeNullableWithAggregatesFilter<"Subscription"> | Date | string | null
+  provider?: Prisma.StringWithAggregatesFilter<"Subscription"> | string
+  payMethod?: Prisma.StringNullableWithAggregatesFilter<"Subscription"> | string | null
+  priceKrw?: Prisma.IntNullableWithAggregatesFilter<"Subscription"> | number | null
+  dailyTurnLimit?: Prisma.IntNullableWithAggregatesFilter<"Subscription"> | number | null
+  billingKeyEnc?: Prisma.StringNullableWithAggregatesFilter<"Subscription"> | string | null
+  anchorDay?: Prisma.IntNullableWithAggregatesFilter<"Subscription"> | number | null
+  cycleNo?: Prisma.IntWithAggregatesFilter<"Subscription"> | number
+  nextChargeAt?: Prisma.DateTimeNullableWithAggregatesFilter<"Subscription"> | Date | string | null
+  nextScheduleId?: Prisma.StringNullableWithAggregatesFilter<"Subscription"> | string | null
+  cancelAtPeriodEnd?: Prisma.BoolWithAggregatesFilter<"Subscription"> | boolean
+  failedChargeCount?: Prisma.IntWithAggregatesFilter<"Subscription"> | number
+  canceledAt?: Prisma.DateTimeNullableWithAggregatesFilter<"Subscription"> | Date | string | null
+  cancelType?: Prisma.StringNullableWithAggregatesFilter<"Subscription"> | string | null
+  renewalNoticeFor?: Prisma.DateTimeNullableWithAggregatesFilter<"Subscription"> | Date | string | null
+  freeTurnLimit?: Prisma.IntNullableWithAggregatesFilter<"Subscription"> | number | null
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"Subscription"> | Date | string
   updatedAt?: Prisma.DateTimeWithAggregatesFilter<"Subscription"> | Date | string
 }
@@ -321,6 +562,21 @@ export type SubscriptionCreateInput = {
   expiresAt?: Date | string | null
   verifiedAt?: Date | string
   revokedAt?: Date | string | null
+  provider?: string
+  payMethod?: string | null
+  priceKrw?: number | null
+  dailyTurnLimit?: number | null
+  billingKeyEnc?: string | null
+  anchorDay?: number | null
+  cycleNo?: number
+  nextChargeAt?: Date | string | null
+  nextScheduleId?: string | null
+  cancelAtPeriodEnd?: boolean
+  failedChargeCount?: number
+  canceledAt?: Date | string | null
+  cancelType?: string | null
+  renewalNoticeFor?: Date | string | null
+  freeTurnLimit?: number | null
   createdAt?: Date | string
   updatedAt?: Date | string
   purchaser: Prisma.UserCreateNestedOneWithoutSubscriptionsPaidInput
@@ -337,6 +593,21 @@ export type SubscriptionUncheckedCreateInput = {
   expiresAt?: Date | string | null
   verifiedAt?: Date | string
   revokedAt?: Date | string | null
+  provider?: string
+  payMethod?: string | null
+  priceKrw?: number | null
+  dailyTurnLimit?: number | null
+  billingKeyEnc?: string | null
+  anchorDay?: number | null
+  cycleNo?: number
+  nextChargeAt?: Date | string | null
+  nextScheduleId?: string | null
+  cancelAtPeriodEnd?: boolean
+  failedChargeCount?: number
+  canceledAt?: Date | string | null
+  cancelType?: string | null
+  renewalNoticeFor?: Date | string | null
+  freeTurnLimit?: number | null
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -349,6 +620,21 @@ export type SubscriptionUpdateInput = {
   expiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   verifiedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   revokedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  provider?: Prisma.StringFieldUpdateOperationsInput | string
+  payMethod?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priceKrw?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  dailyTurnLimit?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  billingKeyEnc?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  anchorDay?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  cycleNo?: Prisma.IntFieldUpdateOperationsInput | number
+  nextChargeAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  nextScheduleId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  cancelAtPeriodEnd?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  failedChargeCount?: Prisma.IntFieldUpdateOperationsInput | number
+  canceledAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  cancelType?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  renewalNoticeFor?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  freeTurnLimit?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   purchaser?: Prisma.UserUpdateOneRequiredWithoutSubscriptionsPaidNestedInput
@@ -365,6 +651,21 @@ export type SubscriptionUncheckedUpdateInput = {
   expiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   verifiedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   revokedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  provider?: Prisma.StringFieldUpdateOperationsInput | string
+  payMethod?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priceKrw?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  dailyTurnLimit?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  billingKeyEnc?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  anchorDay?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  cycleNo?: Prisma.IntFieldUpdateOperationsInput | number
+  nextChargeAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  nextScheduleId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  cancelAtPeriodEnd?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  failedChargeCount?: Prisma.IntFieldUpdateOperationsInput | number
+  canceledAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  cancelType?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  renewalNoticeFor?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  freeTurnLimit?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -379,6 +680,21 @@ export type SubscriptionCreateManyInput = {
   expiresAt?: Date | string | null
   verifiedAt?: Date | string
   revokedAt?: Date | string | null
+  provider?: string
+  payMethod?: string | null
+  priceKrw?: number | null
+  dailyTurnLimit?: number | null
+  billingKeyEnc?: string | null
+  anchorDay?: number | null
+  cycleNo?: number
+  nextChargeAt?: Date | string | null
+  nextScheduleId?: string | null
+  cancelAtPeriodEnd?: boolean
+  failedChargeCount?: number
+  canceledAt?: Date | string | null
+  cancelType?: string | null
+  renewalNoticeFor?: Date | string | null
+  freeTurnLimit?: number | null
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -391,6 +707,21 @@ export type SubscriptionUpdateManyMutationInput = {
   expiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   verifiedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   revokedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  provider?: Prisma.StringFieldUpdateOperationsInput | string
+  payMethod?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priceKrw?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  dailyTurnLimit?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  billingKeyEnc?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  anchorDay?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  cycleNo?: Prisma.IntFieldUpdateOperationsInput | number
+  nextChargeAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  nextScheduleId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  cancelAtPeriodEnd?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  failedChargeCount?: Prisma.IntFieldUpdateOperationsInput | number
+  canceledAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  cancelType?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  renewalNoticeFor?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  freeTurnLimit?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -405,6 +736,21 @@ export type SubscriptionUncheckedUpdateManyInput = {
   expiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   verifiedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   revokedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  provider?: Prisma.StringFieldUpdateOperationsInput | string
+  payMethod?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priceKrw?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  dailyTurnLimit?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  billingKeyEnc?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  anchorDay?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  cycleNo?: Prisma.IntFieldUpdateOperationsInput | number
+  nextChargeAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  nextScheduleId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  cancelAtPeriodEnd?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  failedChargeCount?: Prisma.IntFieldUpdateOperationsInput | number
+  canceledAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  cancelType?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  renewalNoticeFor?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  freeTurnLimit?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -429,8 +775,32 @@ export type SubscriptionCountOrderByAggregateInput = {
   expiresAt?: Prisma.SortOrder
   verifiedAt?: Prisma.SortOrder
   revokedAt?: Prisma.SortOrder
+  provider?: Prisma.SortOrder
+  payMethod?: Prisma.SortOrder
+  priceKrw?: Prisma.SortOrder
+  dailyTurnLimit?: Prisma.SortOrder
+  billingKeyEnc?: Prisma.SortOrder
+  anchorDay?: Prisma.SortOrder
+  cycleNo?: Prisma.SortOrder
+  nextChargeAt?: Prisma.SortOrder
+  nextScheduleId?: Prisma.SortOrder
+  cancelAtPeriodEnd?: Prisma.SortOrder
+  failedChargeCount?: Prisma.SortOrder
+  canceledAt?: Prisma.SortOrder
+  cancelType?: Prisma.SortOrder
+  renewalNoticeFor?: Prisma.SortOrder
+  freeTurnLimit?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
+}
+
+export type SubscriptionAvgOrderByAggregateInput = {
+  priceKrw?: Prisma.SortOrder
+  dailyTurnLimit?: Prisma.SortOrder
+  anchorDay?: Prisma.SortOrder
+  cycleNo?: Prisma.SortOrder
+  failedChargeCount?: Prisma.SortOrder
+  freeTurnLimit?: Prisma.SortOrder
 }
 
 export type SubscriptionMaxOrderByAggregateInput = {
@@ -443,6 +813,21 @@ export type SubscriptionMaxOrderByAggregateInput = {
   expiresAt?: Prisma.SortOrder
   verifiedAt?: Prisma.SortOrder
   revokedAt?: Prisma.SortOrder
+  provider?: Prisma.SortOrder
+  payMethod?: Prisma.SortOrder
+  priceKrw?: Prisma.SortOrder
+  dailyTurnLimit?: Prisma.SortOrder
+  billingKeyEnc?: Prisma.SortOrder
+  anchorDay?: Prisma.SortOrder
+  cycleNo?: Prisma.SortOrder
+  nextChargeAt?: Prisma.SortOrder
+  nextScheduleId?: Prisma.SortOrder
+  cancelAtPeriodEnd?: Prisma.SortOrder
+  failedChargeCount?: Prisma.SortOrder
+  canceledAt?: Prisma.SortOrder
+  cancelType?: Prisma.SortOrder
+  renewalNoticeFor?: Prisma.SortOrder
+  freeTurnLimit?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -457,8 +842,32 @@ export type SubscriptionMinOrderByAggregateInput = {
   expiresAt?: Prisma.SortOrder
   verifiedAt?: Prisma.SortOrder
   revokedAt?: Prisma.SortOrder
+  provider?: Prisma.SortOrder
+  payMethod?: Prisma.SortOrder
+  priceKrw?: Prisma.SortOrder
+  dailyTurnLimit?: Prisma.SortOrder
+  billingKeyEnc?: Prisma.SortOrder
+  anchorDay?: Prisma.SortOrder
+  cycleNo?: Prisma.SortOrder
+  nextChargeAt?: Prisma.SortOrder
+  nextScheduleId?: Prisma.SortOrder
+  cancelAtPeriodEnd?: Prisma.SortOrder
+  failedChargeCount?: Prisma.SortOrder
+  canceledAt?: Prisma.SortOrder
+  cancelType?: Prisma.SortOrder
+  renewalNoticeFor?: Prisma.SortOrder
+  freeTurnLimit?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
+}
+
+export type SubscriptionSumOrderByAggregateInput = {
+  priceKrw?: Prisma.SortOrder
+  dailyTurnLimit?: Prisma.SortOrder
+  anchorDay?: Prisma.SortOrder
+  cycleNo?: Prisma.SortOrder
+  failedChargeCount?: Prisma.SortOrder
+  freeTurnLimit?: Prisma.SortOrder
 }
 
 export type SubscriptionCreateNestedManyWithoutPurchaserInput = {
@@ -545,6 +954,14 @@ export type SubscriptionUncheckedUpdateManyWithoutBeneficiaryNestedInput = {
   deleteMany?: Prisma.SubscriptionScalarWhereInput | Prisma.SubscriptionScalarWhereInput[]
 }
 
+export type IntFieldUpdateOperationsInput = {
+  set?: number
+  increment?: number
+  decrement?: number
+  multiply?: number
+  divide?: number
+}
+
 export type SubscriptionCreateWithoutPurchaserInput = {
   id?: string
   productId: string
@@ -553,6 +970,21 @@ export type SubscriptionCreateWithoutPurchaserInput = {
   expiresAt?: Date | string | null
   verifiedAt?: Date | string
   revokedAt?: Date | string | null
+  provider?: string
+  payMethod?: string | null
+  priceKrw?: number | null
+  dailyTurnLimit?: number | null
+  billingKeyEnc?: string | null
+  anchorDay?: number | null
+  cycleNo?: number
+  nextChargeAt?: Date | string | null
+  nextScheduleId?: string | null
+  cancelAtPeriodEnd?: boolean
+  failedChargeCount?: number
+  canceledAt?: Date | string | null
+  cancelType?: string | null
+  renewalNoticeFor?: Date | string | null
+  freeTurnLimit?: number | null
   createdAt?: Date | string
   updatedAt?: Date | string
   beneficiary: Prisma.UserCreateNestedOneWithoutSubscriptionsReceivedInput
@@ -567,6 +999,21 @@ export type SubscriptionUncheckedCreateWithoutPurchaserInput = {
   expiresAt?: Date | string | null
   verifiedAt?: Date | string
   revokedAt?: Date | string | null
+  provider?: string
+  payMethod?: string | null
+  priceKrw?: number | null
+  dailyTurnLimit?: number | null
+  billingKeyEnc?: string | null
+  anchorDay?: number | null
+  cycleNo?: number
+  nextChargeAt?: Date | string | null
+  nextScheduleId?: string | null
+  cancelAtPeriodEnd?: boolean
+  failedChargeCount?: number
+  canceledAt?: Date | string | null
+  cancelType?: string | null
+  renewalNoticeFor?: Date | string | null
+  freeTurnLimit?: number | null
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -589,6 +1036,21 @@ export type SubscriptionCreateWithoutBeneficiaryInput = {
   expiresAt?: Date | string | null
   verifiedAt?: Date | string
   revokedAt?: Date | string | null
+  provider?: string
+  payMethod?: string | null
+  priceKrw?: number | null
+  dailyTurnLimit?: number | null
+  billingKeyEnc?: string | null
+  anchorDay?: number | null
+  cycleNo?: number
+  nextChargeAt?: Date | string | null
+  nextScheduleId?: string | null
+  cancelAtPeriodEnd?: boolean
+  failedChargeCount?: number
+  canceledAt?: Date | string | null
+  cancelType?: string | null
+  renewalNoticeFor?: Date | string | null
+  freeTurnLimit?: number | null
   createdAt?: Date | string
   updatedAt?: Date | string
   purchaser: Prisma.UserCreateNestedOneWithoutSubscriptionsPaidInput
@@ -603,6 +1065,21 @@ export type SubscriptionUncheckedCreateWithoutBeneficiaryInput = {
   expiresAt?: Date | string | null
   verifiedAt?: Date | string
   revokedAt?: Date | string | null
+  provider?: string
+  payMethod?: string | null
+  priceKrw?: number | null
+  dailyTurnLimit?: number | null
+  billingKeyEnc?: string | null
+  anchorDay?: number | null
+  cycleNo?: number
+  nextChargeAt?: Date | string | null
+  nextScheduleId?: string | null
+  cancelAtPeriodEnd?: boolean
+  failedChargeCount?: number
+  canceledAt?: Date | string | null
+  cancelType?: string | null
+  renewalNoticeFor?: Date | string | null
+  freeTurnLimit?: number | null
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -646,6 +1123,21 @@ export type SubscriptionScalarWhereInput = {
   expiresAt?: Prisma.DateTimeNullableFilter<"Subscription"> | Date | string | null
   verifiedAt?: Prisma.DateTimeFilter<"Subscription"> | Date | string
   revokedAt?: Prisma.DateTimeNullableFilter<"Subscription"> | Date | string | null
+  provider?: Prisma.StringFilter<"Subscription"> | string
+  payMethod?: Prisma.StringNullableFilter<"Subscription"> | string | null
+  priceKrw?: Prisma.IntNullableFilter<"Subscription"> | number | null
+  dailyTurnLimit?: Prisma.IntNullableFilter<"Subscription"> | number | null
+  billingKeyEnc?: Prisma.StringNullableFilter<"Subscription"> | string | null
+  anchorDay?: Prisma.IntNullableFilter<"Subscription"> | number | null
+  cycleNo?: Prisma.IntFilter<"Subscription"> | number
+  nextChargeAt?: Prisma.DateTimeNullableFilter<"Subscription"> | Date | string | null
+  nextScheduleId?: Prisma.StringNullableFilter<"Subscription"> | string | null
+  cancelAtPeriodEnd?: Prisma.BoolFilter<"Subscription"> | boolean
+  failedChargeCount?: Prisma.IntFilter<"Subscription"> | number
+  canceledAt?: Prisma.DateTimeNullableFilter<"Subscription"> | Date | string | null
+  cancelType?: Prisma.StringNullableFilter<"Subscription"> | string | null
+  renewalNoticeFor?: Prisma.DateTimeNullableFilter<"Subscription"> | Date | string | null
+  freeTurnLimit?: Prisma.IntNullableFilter<"Subscription"> | number | null
   createdAt?: Prisma.DateTimeFilter<"Subscription"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"Subscription"> | Date | string
 }
@@ -675,6 +1167,21 @@ export type SubscriptionCreateManyPurchaserInput = {
   expiresAt?: Date | string | null
   verifiedAt?: Date | string
   revokedAt?: Date | string | null
+  provider?: string
+  payMethod?: string | null
+  priceKrw?: number | null
+  dailyTurnLimit?: number | null
+  billingKeyEnc?: string | null
+  anchorDay?: number | null
+  cycleNo?: number
+  nextChargeAt?: Date | string | null
+  nextScheduleId?: string | null
+  cancelAtPeriodEnd?: boolean
+  failedChargeCount?: number
+  canceledAt?: Date | string | null
+  cancelType?: string | null
+  renewalNoticeFor?: Date | string | null
+  freeTurnLimit?: number | null
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -688,6 +1195,21 @@ export type SubscriptionCreateManyBeneficiaryInput = {
   expiresAt?: Date | string | null
   verifiedAt?: Date | string
   revokedAt?: Date | string | null
+  provider?: string
+  payMethod?: string | null
+  priceKrw?: number | null
+  dailyTurnLimit?: number | null
+  billingKeyEnc?: string | null
+  anchorDay?: number | null
+  cycleNo?: number
+  nextChargeAt?: Date | string | null
+  nextScheduleId?: string | null
+  cancelAtPeriodEnd?: boolean
+  failedChargeCount?: number
+  canceledAt?: Date | string | null
+  cancelType?: string | null
+  renewalNoticeFor?: Date | string | null
+  freeTurnLimit?: number | null
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -700,6 +1222,21 @@ export type SubscriptionUpdateWithoutPurchaserInput = {
   expiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   verifiedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   revokedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  provider?: Prisma.StringFieldUpdateOperationsInput | string
+  payMethod?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priceKrw?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  dailyTurnLimit?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  billingKeyEnc?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  anchorDay?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  cycleNo?: Prisma.IntFieldUpdateOperationsInput | number
+  nextChargeAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  nextScheduleId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  cancelAtPeriodEnd?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  failedChargeCount?: Prisma.IntFieldUpdateOperationsInput | number
+  canceledAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  cancelType?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  renewalNoticeFor?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  freeTurnLimit?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   beneficiary?: Prisma.UserUpdateOneRequiredWithoutSubscriptionsReceivedNestedInput
@@ -714,6 +1251,21 @@ export type SubscriptionUncheckedUpdateWithoutPurchaserInput = {
   expiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   verifiedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   revokedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  provider?: Prisma.StringFieldUpdateOperationsInput | string
+  payMethod?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priceKrw?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  dailyTurnLimit?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  billingKeyEnc?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  anchorDay?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  cycleNo?: Prisma.IntFieldUpdateOperationsInput | number
+  nextChargeAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  nextScheduleId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  cancelAtPeriodEnd?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  failedChargeCount?: Prisma.IntFieldUpdateOperationsInput | number
+  canceledAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  cancelType?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  renewalNoticeFor?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  freeTurnLimit?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -727,6 +1279,21 @@ export type SubscriptionUncheckedUpdateManyWithoutPurchaserInput = {
   expiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   verifiedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   revokedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  provider?: Prisma.StringFieldUpdateOperationsInput | string
+  payMethod?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priceKrw?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  dailyTurnLimit?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  billingKeyEnc?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  anchorDay?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  cycleNo?: Prisma.IntFieldUpdateOperationsInput | number
+  nextChargeAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  nextScheduleId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  cancelAtPeriodEnd?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  failedChargeCount?: Prisma.IntFieldUpdateOperationsInput | number
+  canceledAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  cancelType?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  renewalNoticeFor?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  freeTurnLimit?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -739,6 +1306,21 @@ export type SubscriptionUpdateWithoutBeneficiaryInput = {
   expiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   verifiedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   revokedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  provider?: Prisma.StringFieldUpdateOperationsInput | string
+  payMethod?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priceKrw?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  dailyTurnLimit?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  billingKeyEnc?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  anchorDay?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  cycleNo?: Prisma.IntFieldUpdateOperationsInput | number
+  nextChargeAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  nextScheduleId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  cancelAtPeriodEnd?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  failedChargeCount?: Prisma.IntFieldUpdateOperationsInput | number
+  canceledAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  cancelType?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  renewalNoticeFor?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  freeTurnLimit?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   purchaser?: Prisma.UserUpdateOneRequiredWithoutSubscriptionsPaidNestedInput
@@ -753,6 +1335,21 @@ export type SubscriptionUncheckedUpdateWithoutBeneficiaryInput = {
   expiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   verifiedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   revokedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  provider?: Prisma.StringFieldUpdateOperationsInput | string
+  payMethod?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priceKrw?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  dailyTurnLimit?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  billingKeyEnc?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  anchorDay?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  cycleNo?: Prisma.IntFieldUpdateOperationsInput | number
+  nextChargeAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  nextScheduleId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  cancelAtPeriodEnd?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  failedChargeCount?: Prisma.IntFieldUpdateOperationsInput | number
+  canceledAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  cancelType?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  renewalNoticeFor?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  freeTurnLimit?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -766,6 +1363,21 @@ export type SubscriptionUncheckedUpdateManyWithoutBeneficiaryInput = {
   expiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   verifiedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   revokedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  provider?: Prisma.StringFieldUpdateOperationsInput | string
+  payMethod?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priceKrw?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  dailyTurnLimit?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  billingKeyEnc?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  anchorDay?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  cycleNo?: Prisma.IntFieldUpdateOperationsInput | number
+  nextChargeAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  nextScheduleId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  cancelAtPeriodEnd?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  failedChargeCount?: Prisma.IntFieldUpdateOperationsInput | number
+  canceledAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  cancelType?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  renewalNoticeFor?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  freeTurnLimit?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -782,6 +1394,21 @@ export type SubscriptionSelect<ExtArgs extends runtime.Types.Extensions.Internal
   expiresAt?: boolean
   verifiedAt?: boolean
   revokedAt?: boolean
+  provider?: boolean
+  payMethod?: boolean
+  priceKrw?: boolean
+  dailyTurnLimit?: boolean
+  billingKeyEnc?: boolean
+  anchorDay?: boolean
+  cycleNo?: boolean
+  nextChargeAt?: boolean
+  nextScheduleId?: boolean
+  cancelAtPeriodEnd?: boolean
+  failedChargeCount?: boolean
+  canceledAt?: boolean
+  cancelType?: boolean
+  renewalNoticeFor?: boolean
+  freeTurnLimit?: boolean
   createdAt?: boolean
   updatedAt?: boolean
   purchaser?: boolean | Prisma.UserDefaultArgs<ExtArgs>
@@ -798,6 +1425,21 @@ export type SubscriptionSelectCreateManyAndReturn<ExtArgs extends runtime.Types.
   expiresAt?: boolean
   verifiedAt?: boolean
   revokedAt?: boolean
+  provider?: boolean
+  payMethod?: boolean
+  priceKrw?: boolean
+  dailyTurnLimit?: boolean
+  billingKeyEnc?: boolean
+  anchorDay?: boolean
+  cycleNo?: boolean
+  nextChargeAt?: boolean
+  nextScheduleId?: boolean
+  cancelAtPeriodEnd?: boolean
+  failedChargeCount?: boolean
+  canceledAt?: boolean
+  cancelType?: boolean
+  renewalNoticeFor?: boolean
+  freeTurnLimit?: boolean
   createdAt?: boolean
   updatedAt?: boolean
   purchaser?: boolean | Prisma.UserDefaultArgs<ExtArgs>
@@ -814,6 +1456,21 @@ export type SubscriptionSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.
   expiresAt?: boolean
   verifiedAt?: boolean
   revokedAt?: boolean
+  provider?: boolean
+  payMethod?: boolean
+  priceKrw?: boolean
+  dailyTurnLimit?: boolean
+  billingKeyEnc?: boolean
+  anchorDay?: boolean
+  cycleNo?: boolean
+  nextChargeAt?: boolean
+  nextScheduleId?: boolean
+  cancelAtPeriodEnd?: boolean
+  failedChargeCount?: boolean
+  canceledAt?: boolean
+  cancelType?: boolean
+  renewalNoticeFor?: boolean
+  freeTurnLimit?: boolean
   createdAt?: boolean
   updatedAt?: boolean
   purchaser?: boolean | Prisma.UserDefaultArgs<ExtArgs>
@@ -830,11 +1487,26 @@ export type SubscriptionSelectScalar = {
   expiresAt?: boolean
   verifiedAt?: boolean
   revokedAt?: boolean
+  provider?: boolean
+  payMethod?: boolean
+  priceKrw?: boolean
+  dailyTurnLimit?: boolean
+  billingKeyEnc?: boolean
+  anchorDay?: boolean
+  cycleNo?: boolean
+  nextChargeAt?: boolean
+  nextScheduleId?: boolean
+  cancelAtPeriodEnd?: boolean
+  failedChargeCount?: boolean
+  canceledAt?: boolean
+  cancelType?: boolean
+  renewalNoticeFor?: boolean
+  freeTurnLimit?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }
 
-export type SubscriptionOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "purchaserUserId" | "beneficiaryUserId" | "productId" | "purchaseToken" | "status" | "expiresAt" | "verifiedAt" | "revokedAt" | "createdAt" | "updatedAt", ExtArgs["result"]["subscription"]>
+export type SubscriptionOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "purchaserUserId" | "beneficiaryUserId" | "productId" | "purchaseToken" | "status" | "expiresAt" | "verifiedAt" | "revokedAt" | "provider" | "payMethod" | "priceKrw" | "dailyTurnLimit" | "billingKeyEnc" | "anchorDay" | "cycleNo" | "nextChargeAt" | "nextScheduleId" | "cancelAtPeriodEnd" | "failedChargeCount" | "canceledAt" | "cancelType" | "renewalNoticeFor" | "freeTurnLimit" | "createdAt" | "updatedAt", ExtArgs["result"]["subscription"]>
 export type SubscriptionInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   purchaser?: boolean | Prisma.UserDefaultArgs<ExtArgs>
   beneficiary?: boolean | Prisma.UserDefaultArgs<ExtArgs>
@@ -863,10 +1535,12 @@ export type $SubscriptionPayload<ExtArgs extends runtime.Types.Extensions.Intern
     /**
      * active | grace | on_hold | paused | canceled | expired | revoked
      * canceled = 해지 예약(만료일까지는 혜택 유지), expired/revoked = 혜택 종료
+     * 포트원 행은 pending(빌링키 발급 대기) → activating(첫 결제 중) → active, 첫 결제 실패는 failed — 셋 다 혜택 없음
      */
     status: string
     /**
      * 혜택 만료 시각(Play expiryTime). 이 시각 전까지만 유료 티어.
+     * 포트원은 이번 이용기간 끝(= 다음 결제 시각), 결제 실패 재시도 중(grace)에는 재시도 시각 + 하루
      */
     expiresAt: Date | null
     /**
@@ -877,6 +1551,44 @@ export type $SubscriptionPayload<ExtArgs extends runtime.Types.Extensions.Intern
      * 환불·강제 해지 시각(null=유효)
      */
     revokedAt: Date | null
+    /**
+     * 결제 경로 — play(기존 행 기본값) | portone(웹 PG 정기결제). 아래 컬럼은 portone 행에서만 쓴다
+     */
+    provider: string
+    payMethod: string | null
+    /**
+     * 가입 당시 월 금액(부가세 포함) — 갱신 결제는 이 금액으로만(요금 인상은 30일 전 별도 동의 — 전자상거래법 제13조⑥)
+     */
+    priceKrw: number | null
+    /**
+     * 가입 당시 요금제의 하루 대화 상한 — 요금제 설정이 바뀌거나 깨져도 이미 낸 돈만큼의 혜택은 그대로
+     */
+    dailyTurnLimit: number | null
+    /**
+     * 빌링키 AES 암호문(lib/crypto encryptPII) — 해지·만료 때 포트원에서 지운 뒤 null
+     */
+    billingKeyEnc: string | null
+    anchorDay: number | null
+    cycleNo: number
+    nextChargeAt: Date | null
+    /**
+     * 포트원 결제 예약 id — "이미 예약돼 있다"는 응답만 받았으면 그 예약의 결제 id(예약 취소는 빌링키 단위라 id는 '예약 있음' 표시로만 쓴다)
+     */
+    nextScheduleId: string | null
+    cancelAtPeriodEnd: boolean
+    failedChargeCount: number
+    canceledAt: Date | null
+    /**
+     * normal | immediate | withdrawal | payment_failed | link_gone | key_deleted | refunded | purchaser_deleted | beneficiary_deleted
+     * | revoked_external(포트원에서 예약이 취소됨) | test_mode_ended(시험 결제 정리)
+     * · 결제 시작을 막은 시도(failed)는 expired | duplicate | config | not_linked
+     */
+    cancelType: string | null
+    renewalNoticeFor: Date | null
+    /**
+     * 가입 당시 무료 하루 대화 한도(DAILY_TURN_LIMIT) — '유료 혜택 사용' 판정이 나중에 바뀐 무료 한도로 거꾸로 달라지지 않게(lib/billing/portone-cancel)
+     */
+    freeTurnLimit: number | null
     createdAt: Date
     updatedAt: Date
   }, ExtArgs["result"]["subscription"]>
@@ -1313,6 +2025,21 @@ export interface SubscriptionFieldRefs {
   readonly expiresAt: Prisma.FieldRef<"Subscription", 'DateTime'>
   readonly verifiedAt: Prisma.FieldRef<"Subscription", 'DateTime'>
   readonly revokedAt: Prisma.FieldRef<"Subscription", 'DateTime'>
+  readonly provider: Prisma.FieldRef<"Subscription", 'String'>
+  readonly payMethod: Prisma.FieldRef<"Subscription", 'String'>
+  readonly priceKrw: Prisma.FieldRef<"Subscription", 'Int'>
+  readonly dailyTurnLimit: Prisma.FieldRef<"Subscription", 'Int'>
+  readonly billingKeyEnc: Prisma.FieldRef<"Subscription", 'String'>
+  readonly anchorDay: Prisma.FieldRef<"Subscription", 'Int'>
+  readonly cycleNo: Prisma.FieldRef<"Subscription", 'Int'>
+  readonly nextChargeAt: Prisma.FieldRef<"Subscription", 'DateTime'>
+  readonly nextScheduleId: Prisma.FieldRef<"Subscription", 'String'>
+  readonly cancelAtPeriodEnd: Prisma.FieldRef<"Subscription", 'Boolean'>
+  readonly failedChargeCount: Prisma.FieldRef<"Subscription", 'Int'>
+  readonly canceledAt: Prisma.FieldRef<"Subscription", 'DateTime'>
+  readonly cancelType: Prisma.FieldRef<"Subscription", 'String'>
+  readonly renewalNoticeFor: Prisma.FieldRef<"Subscription", 'DateTime'>
+  readonly freeTurnLimit: Prisma.FieldRef<"Subscription", 'Int'>
   readonly createdAt: Prisma.FieldRef<"Subscription", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"Subscription", 'DateTime'>
 }

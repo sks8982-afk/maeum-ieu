@@ -12,7 +12,10 @@
  *
  * 무료 티어는 **기존 DAILY_TURN_LIMIT을 그대로 쓴다**. 구독은 상한을 '올리는' 장치이며,
  *   구독 도입이 기존 사용자의 조건을 조용히 낮추지 않는다.
+ *
+ * 웹 PG(포트원) 요금제는 lib/billing/portone-plans.ts(BILLING_PLANS)에 따로 있다 — 상한도 요금제마다 다르다.
  */
+import { isPgPlanId } from "@/lib/billing/portone-plans";
 
 /** 유료 티어로 인정할 Play 구독 상품 ID 목록 — 쉼표 구분. 비어 있으면 모든 상품을 유료로 인정 */
 export const PRO_PRODUCT_IDS: readonly string[] = (process.env.BILLING_PRO_PRODUCT_IDS || "")
@@ -34,9 +37,9 @@ export function proDailyTurnLimit(freeLimit: number): number {
   return freeLimit > 0 ? freeLimit * 3 : 0;
 }
 
-/** 이 상품 ID가 유료 티어인가 */
+/** 이 상품 ID가 유료 티어인가 — 포트원 요금제 id는 등록된 요금제면 유료(BILLING_PRO_PRODUCT_IDS와 무관) */
 export function isProProduct(productId: string): boolean {
-  return PRO_PRODUCT_IDS.length === 0 || PRO_PRODUCT_IDS.includes(productId);
+  return PRO_PRODUCT_IDS.length === 0 || PRO_PRODUCT_IDS.includes(productId) || isPgPlanId(productId);
 }
 
 /**

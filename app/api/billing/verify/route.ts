@@ -84,6 +84,7 @@ export async function POST(req: Request) {
 
   const beneficiaryUserId = existing?.beneficiaryUserId ?? await resolveBeneficiary(userId, requestedBeneficiary);
 
+  // 돌려받을 칸은 id만 — 웹 결제 컬럼이 아직 DB에 없을 때(DDL보다 배포가 먼저) 없는 컬럼을 읽다 500이 나면 아래 승인을 못 한다(2026-10-22)
   await prisma.subscription.upsert({
     where: { purchaseToken },
     create: {
@@ -91,6 +92,7 @@ export async function POST(req: Request) {
       status, expiresAt: sub.expiresAt, verifiedAt: new Date(),
     },
     update: { productId, status, expiresAt: sub.expiresAt, verifiedAt: new Date() },
+    select: { id: true },
   });
 
   // 3일 안에 승인하지 않으면 Google이 자동 환불한다. 클라이언트가 결제 직후 꺼져도

@@ -36,6 +36,8 @@
     "@google/genai": "^1.50.1",
     "@google/generative-ai": "^0.24.1",
     "@huggingface/transformers": "^4.2.0",
+    "@portone/browser-sdk": "0.1.13",
+    "@portone/server-sdk": "0.19.0",
     "@prisma/adapter-pg": "^7.4.2",
     "@prisma/client": "^7.4.2",
     "@upstash/ratelimit": "^2.0.8",
