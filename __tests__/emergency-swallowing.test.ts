@@ -55,7 +55,7 @@ describe("모더레이션 거절이 응급을 삼키지 않는다", () => {
 describe("일일 한도 게이트가 응급을 삼키지 않는다", () => {
   it("정규식 + LLM 백스톱 둘 다 본 뒤에 차단한다", () => {
     const gate = src.slice(src.indexOf("usage.exceeded"), src.indexOf("dailyLimitReached"));
-    expect(gate).toMatch(/detectEmergency\(spoken\)/);
+    expect(gate).toMatch(/detectEmergencyDetailed\(spoken\)/);
     expect(gate).toMatch(/detectEmergencyLLM\(spoken\)/);
   });
 });

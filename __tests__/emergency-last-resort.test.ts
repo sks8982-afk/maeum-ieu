@@ -22,8 +22,12 @@ vi.mock("@/lib/chat/emergency-notify", () => ({ notifyGuardian: (p: unknown) => 
 
 /** 정규식이 놓치는 꼬리를 잡는 LLM 백스톱 — 네트워크 없이 주입 */
 const detectEmergencyLLM = vi.fn(async (_t: string) => null as null | { level: 2 | 3; category: string; evidence: string });
+/** 맥락 가드가 지운 L2+의 재확인 — 기본은 '아님' */
+type Verdict = { kind: "emergency"; result: { level: 2 | 3; category: string; evidence: string } } | { kind: "none" } | { kind: "error" };
+const confirmEmergencyLLM = vi.fn(async (_t: string): Promise<Verdict> => ({ kind: "none" }));
 vi.mock("@/lib/chat/emergency-llm", () => ({
   detectEmergencyLLM: (t: string) => detectEmergencyLLM(t),
+  confirmEmergencyLLM: (t: string) => confirmEmergencyLLM(t),
   SOFT_SIGNAL: /./,
 }));
 
@@ -43,6 +47,25 @@ beforeEach(() => {
   vi.clearAllMocks();
   notifyGuardian.mockResolvedValue({ sent: true, channels: ["fcm"], reason: undefined });
   detectEmergencyLLM.mockResolvedValue(null);
+  confirmEmergencyLLM.mockResolvedValue({ kind: "none" });
+});
+
+describe("(F) 맥락 가드 재확인 — 본류와 같은 함수(detectWithBackstop)를 쓴다(2026-10-22)", () => {
+  it("가드가 지운 L3를 백스톱이 아니라고 하면 발동하지 않는다", async () => {
+    const r = await run({ userId: "u1", text: "친구가 넘어져서 다쳤대" }, { minLevel: 2 });
+    expect(confirmEmergencyLLM).toHaveBeenCalledTimes(1);
+    expect(r.fired).toBe(false);
+  });
+
+  it("백스톱이 모름이면 정규식 L3로 발동한다 — 장애 중의 안전망이 가장 중요하다", async () => {
+    confirmEmergencyLLM.mockResolvedValue({ kind: "error" });
+    const r = await run({ userId: "u1", text: "딸이 와서 보더니 내 입이 돌아갔대" });
+    // 🔒 안전망은 요청이 실패한 순간에 돈다 — 그때 백스톱도 죽어 있기 쉽다. 모름을 '아님'으로 읽으면 안전망째 조용해진다
+    expect(r.fired).toBe(true);
+    expect(r.level).toBe(3);
+    expect(r.reply).toContain("119");
+    expect(notifyGuardian).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("(A) 음성 턴 — 현재 발화를 재전사해 평가한다", () => {

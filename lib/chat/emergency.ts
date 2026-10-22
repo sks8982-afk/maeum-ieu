@@ -51,9 +51,20 @@ const PAST_CONTEXT_GUARD = /(예전[에엔은도]|옛날[에엔은도]|어릴\s*
  * 적용 범위: 자살·복약 외 범주(L3 신체·L2·L1). 자살·복약은 RESOLVED/STILL_DISTRESSED로 따로 조정돼 있어
  *   기존(발화 전체) 판정을 유지한다. 꿈·TV·뉴스 같은 매체 맥락은 위치와 무관하게 발화 전체에 적용한다.
  */
-const PAST_TIME_MARKER = /예전[에엔은도]|옛날[에엔은도]|어릴\s*[때적]|어렸을\s*적|젊었을\s*[때적]|젊을\s*[적때]|젊은\s*시절|한창\s*때|왕년에|작년에|지난번에|저번에/g;
-const MEDIA_DREAM_GUARD = /꿈에서|꿈\s*꿨|TV|드라마|영화\s*(?:에서|봤|보고)|뉴스|방송에서/;
-const PRESENT_MARKER = /요즘|요새|요즈음|지금|오늘|이번\s*주|며칠째|방금|아까/g;
+// (2026-10-22) 줄임꼴('땐'·'엔')·"어렸을 때"·돌아가신 분 회상("돌아가시기 전에"·"생전에")과 꿈·매체의 다른 꼴("어젯밤 꿈에"·
+//   "테레비 보니까"·"티비에서")을 더했다 — 지난 일·꿈·텔레비전 이야기가 L3 출혈이었다(검토자 문장). '꿈에도'(관용)·'꿈에 그리던'은 뺀다.
+//   ⚠ 이 둘은 **재확인 가드**다(detectEmergencyDetailed) — 걸려도 판정을 버리지 않고 백스톱이 다시 본다. 같은 낱말이 진짜 위급과
+//   함께 흔히 나온다("꿈에서 깼는데 입이 돌아갔어"·"작년엔 괜찮았는데 발음이 이상해" — 낱말만으로 지우면 알림 0이었다).
+//   재확인 가드라 넓게 잡는다(같은 날 독립 검토가 찾은 변형) — 젊어서·왕년엔·옛적·몇 해 전·그때는·그 시절·처녀 때·지난달·얼마 전·
+//   돌아가셨을 때·임종·죽기 전, 꿈 전부(꿈속·꿈결·악몽·"…꿈을 꿨어"), 매체 낱말 전부(텔레비전·티브이·라디오·신문·사극·동영상·만화).
+//   (같은 날 저녁 검토) 지금 일에 쓰는 같은 낱말은 뺀다 — 가드에 걸리면 바로 알리지 않고 재확인(약 2초·LLM 의존)으로 가기 때문이다.
+//   '꿈쩍·꿈틀·꿈뻑'(넘어져서 꿈쩍도 못 해)·'꿈에도'·'꿈만 같'·'신문지'·'영화관'·'안내 방송'·'생전 처음'·'이러다/나 죽기 전에'.
+//   '그때부터'·'~전부터'는 지금까지 이어지는 일이다("그때부터 피가 안 멈춰"·"얼마 전부터 숨이 차"). 맨 '그때'는 그대로 둔다 — "아까
+//   화장실 갔는데 그때 넘어져서"는 재확인(정규식 판정을 지킨다)으로 가지만, 빼면 "그때 고기가 덜 익어서 피가 많이 나와" 꼴이 바로
+//   알림이 됐다(오탐 묶음 315줄). 지금 표지에 '아직도·이제·이젠·이번에/엔'을 더한다("작년엔 괜찮았는데 이제 피가 안 멈춰").
+const PAST_TIME_MARKER = /예전[에엔은도]|옛날[에엔은도]|옛\s*적|어릴\s*(?:[때적]|땐)|어렸을\s*(?:[때적]|땐)|젊었을\s*(?:[때적]|땐)|젊을\s*(?:[적때]|땐)|젊은\s*시절|젊어서|한창\s*(?:때|땐)|왕년|작년(?:에|엔)|지난번(?:에|엔)|저번(?:에|엔)|돌아가시기\s*전|돌아가실\s*(?:때|땐|적)|돌아가셨을\s*때|살아\s*계실\s*(?:때|땐|적)|생전(?!\s*처음)|임종|(?<!(?:이러다|나|내가)\s*)죽기\s*전|몇\s*(?:해|년)\s*전(?!부터)|그때(?!부터)|그땐|그\s*시절|처녀\s*때|지난\s*(?:달|해|겨울|여름|봄|가을)(?!부터)|얼마\s*전(?!부터)/g;
+const MEDIA_DREAM_GUARD = /꿈(?![쩍뻑틀적]|지럭|에도|에\s*그리|만\s*같)|악몽|TV|tv|Tv|티비|티브이|테레비|텔레비|유튜브|유투브|드라마|연속극|사극|영화(?!관)|뉴스|라디오|신문(?!지)|(?<!안내\s?)방송|동영상|만화/;
+const PRESENT_MARKER = /요즘|요새|요즈음|지금|오늘|이번\s*주|며칠째|방금|아까|아직도|이제|이젠|이번(?:에|엔)/g;
 function pastGovernsAt(text: string, evidenceIdx: number): boolean {
   if (MEDIA_DREAM_GUARD.test(text)) return true;
   const lastBefore = (re: RegExp) => {
@@ -122,10 +133,37 @@ const HWATU_CONTEXT = /고스톱|화투|피박|쌍피|(?<![가-힣])광\s*(?:팔
 //   ⚠ "할 말"은 단서로 쓰지 않는다 — "할 말이 많은데 말이 안 나와"는 실어증(뇌졸중)일 수 있다.
 const SPEECH_FIGURATIVE = /(?:기가?\s*막|기막|어이(?:가)?\s*없|어처구니|황당|놀라|놀래|감동|억울|서운|창피|부끄러)[^.!?]{0,15}말(?:이|을|도)?[\s가-힣]{0,3}?안\s*나와|말(?:이|을|도)?[\s가-힣]{0,3}?(?:꼬여|꼬였|헛나)[^.!?]{0,10}(?:다시|정정|미안|잘못)|말(?:이|을|도)?\s*헛나왔/;
 
-const THIRD_PARTY_GUARD =/(?:친구|옆집|이웃|아는\s*사람|누가|누군가|어떤\s*(?:사람|노인|분|할[머아]\S*)|동네\s*(?:사람|분)|노인정|경로당|같은\s*반)[^.!?]{0,30}(?:더라|더군|답니다|랍니다|한다더|그러더|라던데|했대|갔대|하시더|셨대|대[요다]?(?=[\s.!?,]|$))/;
+//   (2026-10-22) 손주·자녀 이야기를 전해 듣는 꼴("손주 녀석이 놀이터서 넘어져서 피가 났대")이 L3 낙상이었다 — 손주·손녀·손자·조카·
+//   아들·딸·며느리·사위를 더한다. 재확인 가드라 가족이 전해 준 **어르신 본인** 일("딸이 와서 보더니 내 입이 돌아갔대")은 백스톱이 잡는다.
+//   같은 날 검토가 찾은 변형도 넣었다 — 동생·언니·오빠·형님·누나·시누이·사돈·사촌·목사님·권사님·앞집·윗집·아랫집·뒷집·마을 사람·
+//   회관·그 집·○씨·"들은 얘긴데", 끝말 -다네·-다는데·-다고 전화/문자 왔어·-대서·-다고 하데·-다더구먼·-다나 봐·-다는구먼·-래, 창 60자.
+//   (같은 날 저녁 검토) ○씨는 날씨가·글씨가가 아닐 때만(아저씨가는 남이다), '-래'는 말래·보래·하래만(해 줄래·노래·
+//   아래·이래 아님), '-대'는 침대·군대가 아닐 때만("손주 침대서 자다가 떨어졌는데 못 일어나겠어"). '할머니…' 뒤는 세 글자까지 —
+//   `\S*`가 뒤의 창과 겹쳐 5000자 반복 입력에서 2초 가까이 걸렸다(역추적).
+const THIRD_PARTY_GUARD =/(?:친구|옆집|이웃|아는\s*사람|누가|누군가|어떤\s*(?:사람|노인|분|할[머아][가-힣]{0,3})|동네\s*(?:사람|분)|노인정|경로당|같은\s*반|손주|손녀|손자|조카|아들|딸(?!기)|며느리|사위|동생|언니|오빠|형님|누나|시누이|사돈|사촌|목사님|권사님|앞집|윗집|아랫집|뒷집|마을\s*사람|회관|그\s*집|(?![날글])[가-힣]씨(?:가|는|네)|들은\s*(?:얘기|얘긴|이야기|이야긴))[^.!?]{0,60}(?:더라|더군|답니다|랍니다|한다더|그러더|라던데|했대|갔대|하시더|셨대|(?<![침군])대[요다]?(?=[\s.!?,]|$)|다네|다는데|다고\s*(?:전화|문자)|(?<![침군])대서|다고\s*하[데네]|다더|다나\s*봐|다는구|(?<=[말보하])래요?(?=[\s.!?,]|$))/;
 // 점으로 띄운 남의 이야기("옆집..할머니가..넘어져서..다쳤대") — 원문 가드는 '..'에서 끊겨 못 본다. 점을 공백으로 읽은 글에서는
 //   전언 끝말이 **발화 끝**일 때만 남의 이야기로 본다("친구가..넘어졌대..나도가슴이너무아파"의 본인 호소는 지우지 않는다)
 const THIRD_PARTY_WHOLE = new RegExp(THIRD_PARTY_GUARD.source + String.raw`\s*[.!?~]*\s*$`);
+// 출혈 규칙의 재확인 가드(2026-10-22 검토자 문장) — 음식 손질 바로 뒤의 '피'("생선 대가리 자르니까 피가 콸콸 나오네"), 관용 '피 흘려 ○ 지킨',
+//   손주의 가벼운 상처("손주가자전거타다 넘어져서 무릎까졌는데 피가좀나" — 손주가 문장 첫머리 주어이고 머리·못 일어남·부러짐·의식·숨이
+//   없을 때). 걸리면 낙상·출혈 L3를 건너뛰고(재확인 가드) 백스톱이 다시 본다 — "생선 손질하다가 피가 안 멈춰"(본인이 베였다는 말 생략)·
+//   "손주가 밀어서 넘어졌는데 피가 좀 나"(넘어진 사람은 어르신)도 같은 꼴이라 낱말만으로는 못 지운다.
+//   (같은 날 검토 변형) 음식은 고등어·갈치·오리·돼지·회와 잡·뜨·가르·빼(핏물), 그리고 전쟁·종교의 피 흘림(육이오·피난·월남·예수·순교),
+//   화투 변형(맞고·고스돕·동양화), 반려동물·가축(강아지·고양이·개·소·닭·염소), 생리·출산 회상도 출혈의 재확인 가드다.
+//   손주는 손녀딸·외손주·증손주·손주들·애기와 약간·찔끔·몇 방울, 첫머리 앞의 짧은 말("어제 손주가"·"아이고 손주가")까지 받는다.
+//   (같은 날 저녁 검토) 낱말 조각에 걸리던 꼴을 뺐다 — 회는 회를 뜨거나 썰 때만(교회·회사·회식 아님), 음식 손질이어도 본인이 베이거나
+//   다쳤다는 말이 있으면 가드를 걸지 않는다(SELF_INJURY_HINT — "닭가슴살 자르다 손 베여서 피가 안 멈춰"는 바로 L3), 해산물·유산균·
+//   상속 '유산'·생리식염수·생리대·월남쌈·"주사 맞고 치료"·'코피난다'의 피난·"딸 출산 도와주러"는 이야기가 아니다.
+const FOOD_PREP_BLOOD = /(?:고기|생선|갈비|닭|고등어|갈치|오리|돼지|회(?=\s*(?:를\s*)?(?:뜨|떠|썰)))[\s가-힣]{0,14}?(?:자르|잘라|썰|써|손질|다듬|잡|뜨|떠|가르|빼)[\s가-힣]{0,8}?피/;
+const SELF_INJURY_HINT = /베[이였여인었]|찔[리려렸]|다[치쳐쳤]|손가락|손을|칼에|잘못/;
+const IDIOM_BLOOD = /피\s*흘려\s*[가-힣]{1,3}\s*(?:지킨|지켜|싸운|싸워|키운|일군)|육이오|6\s*[.·]\s*25|전쟁|피난(?=\s*(?:가|갔|길|민|때|시절))|월남(?!쌈)|예수|순교|맞고(?=\s*(?:치(?!료)|쳤|칠|판))|고스돕|동양화|생리(?!\s*식염|대)|월경|애\s*낳|출산(?=\s*(?:할|했|하|때|후))|해산(?!물)|유산(?=\s*(?:했|하|기))/;
+// 반려동물·가축이 주어인 이야기("우리 강아지가 넘어져서 다리를 못 써"·"강아지가 다쳐서 피가 철철 나") — 낙상·출혈의 재확인 가드.
+//   동물이 **주어**일 때만 — "개한테 물렸는데 피가 안 멈춰"·"강아지한테 물렸는데"·"개를 씻기다 넘어졌어"(어르신의 일)는 가드에 걸지 않는다.
+//   (같은 날 저녁 검토) 강아지·고양이도 주격 조사가 붙을 때만, 수를 세는 '개'("손가락 두 개가 베였는데")·닭가슴살·소가죽은 동물이 아니다.
+const ANIMAL_SUBJECT = /(?:강아지|고양이)(?:가|는|도)|(?<![가-힣]|[한두세네몇0-9]\s?)(?:개|소|닭|염소)(?:가(?!슴|죽)|이|는|은|도)/;
+const GRANDCHILD_MINOR = /^(?:(?:어제|아까|오늘|아이고|아이구)\s*)?(?:우리\s*)?(?:손(?:주|녀|자)|외손\S?|증손\S?|애기)(?:\s*(?:녀석|놈|딸|들))?(?:가|이|는|도)[^.!?]*?피(?:가|도|는)?\s*(?:좀|조금|쪼금|살짝|쪼끔|약간|찔끔|몇\s*방울)/;
+//   (같은 날 저녁 검토) 눈앞이 캄캄·어지러움·경련·축 늘어짐·토함도 크게 다친 표지다(가벼운 상처 이야기에는 안 나온다).
+const GRANDCHILD_SERIOUS = /머리|못\s*일어|일어나지\s*(?:를\s*)?못|부러|의식|숨|캄캄|어지러|경련|축\s*늘어|토하|토했/;
 
 /**
  * 출혈 — 2026-10-19 다시 짰다(운영 판정 방식 위에 붙여 쓰기 대응을 더함).
@@ -305,8 +343,30 @@ const L1_RULES: PatternRule[] = [
 
 /**
  * 단일 발화 평가. 과거/비유 맥락이면 강등.
+ *   맥락 가드(남의 이야기·지난 일·꿈·TV·화투·음식 손질·관용·손주의 가벼운 상처)가 지운 판정은 detectEmergencyDetailed가
+ *   suppressed로 함께 돌려준다 — 백스톱 재확인(emergency-evaluate의 detectWithBackstop)이 그걸 쓴다.
  */
 export function detectEmergency(userText: string): EmergencyResult {
+  return evaluateRules(userText, true);
+}
+
+/**
+ * 재확인용 — 맥락 가드가 지운 L2+ 판정을 suppressed로 함께 돌려준다(2026-10-22).
+ *   맥락 가드는 "지금 일이 아닐 수 있다"는 낱말이라 같은 낱말이 진짜 위급과 흔히 같이 나온다("딸이 와서 보더니 내 입이 돌아갔대"·
+ *   "꿈에서 깼는데 입이 돌아갔어"·"작년엔 괜찮았는데 발음이 이상해" — 낱말만으로 지우면 알림 0이었다, 독립 검토). 그래서 가드에
+ *   걸려도 판정을 버리지 않고, 백스톱이 '아님'이라고 할 때만 내린다. 백스톱이 장애·시간 초과면 정규식 판정을 지킨다.
+ */
+//   ⚠ 가드가 L3를 지우고 다른 규칙의 L2·L1이 남은 꼴도 재확인한다("강아지가 끌어서 넘어져서 머리가 너무 아파" → 가드 켠 판정은
+//   L2 심한 통증). result만 보고 L2에서 멈추면 L3(119 안내·즉시 알림)가 재확인 없이 L2로 내려갔다(같은 날 저녁 독립 검토 3갈래가 재현).
+export function detectEmergencyDetailed(userText: string): { result: EmergencyResult; suppressed?: EmergencyResult } {
+  const result = evaluateRules(userText, true);
+  if (result.level === 3) return { result };
+  const raw = evaluateRules(userText, false);
+  return raw.level >= 2 && raw.level > result.level ? { result, suppressed: raw } : { result };
+}
+
+/** contextGuards=false면 맥락 가드만 끄고 판정한다 — 말의 꼴을 보는 가드(부정·비유·복약 질문·자살 완곡어)는 그대로다 */
+function evaluateRules(userText: string, contextGuards: boolean): EmergencyResult {
   const none: EmergencyResult = { level: 0, evidence: "", category: "none" };
   if (!userText) return none;
   const text = normalizeEmergencyText(userText.trim());
@@ -325,7 +385,7 @@ export function detectEmergency(userText: string): EmergencyResult {
   //   L1(관찰)로도 올리지 않는다: 남의 이야기는 본인 건강 추세와 무관하다.
   //   ⚠ 원문으로 본다 — 점을 공백으로 읽은 글에서는 가드 창([^.!?])이 '..'를 건너 "친구가..넘어졌대..나도가슴이너무아파"의
   //   본인 호소까지 지운다(2026-10-19 독립 검토).
-  if (THIRD_PARTY_GUARD.test(userText.trim()) || THIRD_PARTY_WHOLE.test(text)) return none;
+  if (contextGuards && (THIRD_PARTY_GUARD.test(userText.trim()) || THIRD_PARTY_WHOLE.test(text))) return none;
 
   // L3부터 매칭
   for (const rule of L3_RULES) {
@@ -339,13 +399,17 @@ export function detectEmergency(userText: string): EmergencyResult {
         if (/^말/.test(m[0]) && SPEECH_FIGURATIVE.test(text)) continue;
         if (m.index !== undefined && MED_NEGATED.test(text.slice(m.index + m[0].length, m.index + m[0].length + 14))) continue;
       }
-      if (rule.category === "bleeding" && HWATU_CONTEXT.test(text)) continue;
+      if (contextGuards && rule.category === "bleeding" && (HWATU_CONTEXT.test(text) || (FOOD_PREP_BLOOD.test(text) && !SELF_INJURY_HINT.test(text)) || IDIOM_BLOOD.test(text))) continue;
+      if (contextGuards && (rule.category === "fall_injury" || rule.category === "bleeding")
+        && ((GRANDCHILD_MINOR.test(text) && !GRANDCHILD_SERIOUS.test(text)) || ANIMAL_SUBJECT.test(text))) continue;
       // 과거 회상 — suicidal/medication만 L2로 보존(과소평가 방지), 그 외는 무시
       //   ⚠ 신체 범주는 **근거 바로 앞의 시점 표지**로 판정한다(pastGovernsAt, 2026-10-06 B12) — "어릴 때 다친 적 있는데
       //   지금 어지러워서 못 일어나겠어"가 L0였다. 자살·복약은 따로 조정된 기존(발화 전체) 판정을 유지한다.
-      const pastHere = rule.category === "suicidal" || rule.category === "medication_error" || m.index === undefined
-        ? isPastContext
-        : pastGovernsAt(text, m.index);
+      //   (2026-10-22 저녁 검토) 자살·복약의 과거 처리(해소된 과거는 건너뜀·아니면 L2 보존)는 말의 꼴을 보는 판정이라 가드를 끈 재확인
+      //   판정에서도 그대로 둔다 — 끄면 "젊을 때 죽고 싶었지만 이제는 마음 편해졌어"가 재확인으로 가서 백스톱 장애 때 109 위기 안내가 나갔다.
+      const pastHere = rule.category === "suicidal" || rule.category === "medication_error"
+        ? isPastContext // 자살·복약 — 가드를 끈 판정에서도 그대로
+        : contextGuards && (m.index === undefined ? isPastContext : pastGovernsAt(text, m.index));
       if (pastHere) {
         // 단, 이미 해소된 과거 복약 사고("예전에 ~한 적 있었지, 그 뒤로 잘 챙겨")는 현재 응급 아님 (2026-06-25 라운드7 위양성)
         if (rule.category === "medication_error" && (/적\s*(?:이|도)?\s*있었|그\s*뒤로|그\s*후로?|이제[는요]?\s*(?:잘|괜찮)|인자[는]?\s*(?:잘|괜찮|챙)|지금[은]?\s*(?:잘|괜찮)/.test(text) || /뉴스|드라마|TV|영화|방송|어떤\s*(?:사람|노인|할[머아])/.test(text))) continue;
@@ -415,7 +479,7 @@ export function detectEmergency(userText: string): EmergencyResult {
   for (const rule of L2_RULES) {
     const m = text.match(rule.pattern);
     if (m) {
-      if (m.index !== undefined ? pastGovernsAt(text, m.index) : isPastContext) continue;
+      if (contextGuards && (m.index !== undefined ? pastGovernsAt(text, m.index) : isPastContext)) continue; // L2 규칙의 지난 일·꿈·TV
       if (isFigurative) return { level: 1, evidence: m[0], category: rule.category };
       return { level: 2, evidence: m[0], category: rule.category };
     }
@@ -450,7 +514,11 @@ export function buildEmergencyL3Reply(
     case "fall_injury":
       return `${honorific}! 다치셨다니 ${companionName} 너무 놀랐어요. 움직이지 마시고 119에 전화하셔서 도움을 받으세요. ${family}.`;
     case "bleeding":
-      return `${honorific}, 피가 멈추지 않으면 위험해요. 깨끗한 수건으로 꾹 눌러주시고, 바로 119에 전화하세요. ${family}.`;
+      // (2026-10-22) 피를 토하거나 기침·대변·소변에 섞인 피(몸속 출혈)도 정규식 출혈로 잡혀 이 멘트가 나간다 — 그래서 119를 조건 없이
+      //   맨 앞에 두고, 지혈은 다친 곳·코피일 때만 따로 말한다. "상처에서 나는 피면 …눌러주시고, 바로 119에" 한 문장은 119까지 '상처면'
+      //   조건으로 들렸다(같은 날 저녁 독립 검토). 분류를 바꾸지 않는 까닭: 분류별 1시간 중복 차단·보호자 라벨까지 바뀌어서
+      //   가슴 통증 알림 뒤의 "피를 토했어"가 묻힌다.
+      return `${honorific}, 어디서 나는 피든 지금 바로 119에 전화하세요. 다친 곳이면 깨끗한 수건으로 꾹 누르고 계시고, 코피면 고개를 앞으로 숙이고 콧방울을 꼭 잡아 주세요. ${family}.`;
     case "medication_error":
       return `${honorific}, 약을 잘못 드셨다니 큰일이에요. 바로 119에 전화하시고 어떤 약을 얼마나 드셨는지 그대로 말씀해주세요. 토하려 하지 마시고 안내를 기다려주세요.`;
     case "suicidal":

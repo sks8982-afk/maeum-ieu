@@ -52,7 +52,10 @@ const runCognitiveAnalysis = vi.fn(async () => { calls.push("cognitive"); });
 vi.mock("@/lib/chat/cognitive-run", () => ({ runCognitiveAnalysis: () => runCognitiveAnalysis() }));
 // 백스톱은 조절 가능해야 한다 — 항상 null이면 "한도 예외에 백스톱이 포함된다"를 검증할 수 없다
 const backstop = vi.fn<(text: string) => Promise<{ level: 0 | 1 | 2 | 3; category: string; evidence: string } | null>>(async () => null);
-vi.mock("@/lib/chat/emergency-llm", () => ({ detectEmergencyLLM: (t: string) => backstop(t) }));
+// 맥락 가드가 지운 L2+의 재확인(2026-10-22) — 기본은 '아님'. 재확인 시험만 바꾸고 beforeEach가 되돌린다
+type Verdict = { kind: "emergency"; result: { level: 2 | 3; category: string; evidence: string } } | { kind: "none" } | { kind: "error" };
+const confirm = vi.fn<(text: string, evidence?: string) => Promise<Verdict>>(async () => ({ kind: "none" }));
+vi.mock("@/lib/chat/emergency-llm", () => ({ detectEmergencyLLM: (t: string) => backstop(t), confirmEmergencyLLM: (t: string, e?: string) => confirm(t, e) }));
 const notifyGuardian = vi.fn<(p: { level: number }) => Promise<{ sent: boolean; channels: string[] }>>(
   async () => ({ sent: true, channels: ["push"] }));
 vi.mock("@/lib/chat/emergency-notify", () => ({ notifyGuardian: (p: { level: number }) => notifyGuardian(p) }));
@@ -94,6 +97,8 @@ beforeEach(() => {
   session = { user: { id: "u-elder", name: "김어르신", screeningMode: "user" } };
   backstop.mockReset();
   backstop.mockImplementation(async () => null);
+  confirm.mockReset();
+  confirm.mockImplementation(async () => ({ kind: "none" }));
   for (const f of [saveMessages, runCognitiveAnalysis, notifyGuardian, extractAndSaveProfile, maybeTriggerSummaryRollup, getDailyUsage, countRecentL1Signals]) f.mockClear();
 });
 
@@ -230,6 +235,37 @@ describe("L1 24시간 누적 → L2 승격 — /api/chat과 같은 규칙", () =
     // 🔒 저장 뒤에 세면 현재 턴이 포함돼 /api/chat보다 한 턴 일찍 끊긴다(F3)
     expect(calls.indexOf("usage")).toBeGreaterThanOrEqual(0);
     expect(calls.indexOf("usage")).toBeLessThan(calls.indexOf("save"));
+  });
+});
+
+describe("맥락 가드 재확인 — /api/chat과 같은 함수(evaluateEmergency)로 가른다 (2026-10-22)", () => {
+  it("가드가 지운 L3 + 재확인 모름(error) → L3로 저장하고 보호자에게 알린다", async () => {
+    const { detectEmergencyDetailed } = await import("@/lib/chat/emergency");
+    const text = "딸이 와서 보더니 내 입이 돌아갔대";
+    expect(detectEmergencyDetailed(text), "전제: 가드 켠 판정은 0, 가드가 지운 판정은 L3").toMatchObject({ result: { level: 0 }, suppressed: { level: 3 } });
+    confirm.mockImplementation(async () => ({ kind: "error" }));
+    const r = await call(req(text, "어머, 괜찮으세요?"));
+    expect(r.status).toBe(200);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    // 🔒 모름을 '아님'으로 읽으면 Gemini 장애 중에 가족이 알려 준 뇌졸중 신호(입이 돌아감)가 알림 없이 사라진다
+    expect(r.body.emergencyLevel).toBe(3);
+    expect(saveMessages.mock.calls[0][0].emergencyLevel).toBe(3);
+    expect(notifyGuardian).toHaveBeenCalledTimes(1);
+    expect(notifyGuardian.mock.calls[0][0].level).toBe(3);
+  });
+
+  it("가드가 지운 L3 + 재확인 아님(none) → 응급 아님 — 알림·응급 마킹 없음", async () => {
+    const { detectEmergencyDetailed } = await import("@/lib/chat/emergency");
+    const text = "친구가 넘어져서 다쳤대";
+    expect(detectEmergencyDetailed(text), "전제: 가드 켠 판정은 0, 가드가 지운 판정은 L3").toMatchObject({ result: { level: 0 }, suppressed: { level: 3 } });
+    const r = await call(req(text, "저런, 많이 다치셨대요?"));
+    expect(r.status).toBe(200);
+    // 🔒 재확인 없이 가드 판정만 쓰면 이 시험은 공허하게 녹색이다 — 실제로 물었고 그 '아님'을 따랐는지 본다
+    expect(confirm).toHaveBeenCalledTimes(1);
+    // 🔒 백스톱이 '아님'이라고 한 남의 이야기에 L3 알림이 가면 보호자가 알림을 믿지 않게 된다
+    expect(r.body.emergencyLevel).toBe(0);
+    expect(saveMessages.mock.calls[0][0].emergencyLevel).toBeUndefined();
+    expect(notifyGuardian).not.toHaveBeenCalled();
   });
 });
 

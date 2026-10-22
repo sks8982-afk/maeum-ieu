@@ -15,8 +15,8 @@
  * ⚠ 이 모듈은 **DB를 한 번도 치지 않는다**(notifyGuardian 내부 조회는 제외 — 그쪽은 자체 fail-open).
  *   DB가 죽어서 들어온 경로이므로 여기서 또 조회하면 같은 예외로 안전망째 무너진다.
  */
-import { detectEmergency, buildEmergencyL3Reply, type EmergencyCategory } from "@/lib/chat/emergency";
-import { detectEmergencyLLM } from "@/lib/chat/emergency-llm";
+import { buildEmergencyL3Reply, type EmergencyCategory } from "@/lib/chat/emergency";
+import { detectWithBackstop } from "@/lib/chat/emergency-evaluate";
 import { notifyGuardian } from "@/lib/chat/emergency-notify";
 
 export interface SosState {
@@ -76,14 +76,10 @@ export async function lastResortEmergency(params: {
    *   이 모듈의 'DB 안 친다' 원칙과 충돌하지 않는다. 실패하면 null이라 더 나빠지지도 않는다.
    */
   //   (2026-10-19) L1(관찰)도 백스톱에 태운다 — 본류(detectWithBackstop)와 같다. L1 뒤의 급성 신호를 놓치지 않게.
-  let result = detectEmergency(content);
-  if (result.level < 2) {
-    const llm = await detectEmergencyLLM(content).catch(() => null);
-    if (llm) {
-      console.log(`[last-resort] 정규식 L${result.level} → LLM 백스톱이 응급 포착:`, llm.category);
-      result = llm;
-    }
-  }
+  //   (2026-10-22) 본류 함수를 그대로 쓴다 — 맥락 가드 재확인(장애면 정규식 판정을 지킴)까지 같아야 한다. 따로 복사해 두면 한쪽만
+  //   고쳐진다(F3). detectWithBackstop은 DB를 치지 않는다(정규식 + Gemini뿐) — 이 모듈의 원칙과 맞는다.
+  const result = await detectWithBackstop(content);
+  if (result.evidence.startsWith("llm:")) console.log("[last-resort] LLM 백스톱이 응급 포착:", result.category);
   if (result.level < minLevel) return { fired: false, level: result.level, skipped: "below-threshold" };
 
   const level = result.level as 2 | 3;

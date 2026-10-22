@@ -17,6 +17,7 @@
  *       호출 횟수 자체를 단언한다(2026-06-26 측정: 발화율 8.4%→1.7%로 정밀화한 이력).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { detectEmergencyDetailed } from "@/lib/chat/emergency";
 
 const generateContent = vi.fn();
 const logUsage = vi.fn();
@@ -35,6 +36,12 @@ const reply = (obj: unknown) => ({ text: JSON.stringify(obj) });
 async function detect(text: string) {
   const { detectEmergencyLLM } = await import("@/lib/chat/emergency-llm");
   return detectEmergencyLLM(text);
+}
+
+/** evidence를 빼면 기본값("") — 600자 이하만 물을 수 있다 */
+async function confirmVerdict(text: string, evidence?: string) {
+  const { confirmEmergencyLLM } = await import("@/lib/chat/emergency-llm");
+  return confirmEmergencyLLM(text, evidence);
 }
 
 beforeEach(() => {
@@ -191,6 +198,182 @@ describe("프롬프트 카테고리 정의 — 분류가 L3 안내 문구를 고
     // 🔒 bleeding을 넓힌 뒤 "면도하다 살짝 베여서 피가 났어"·"모기 물린 데 긁었더니 피 났네"가 L2(보호자 알림)로 떴다
     expect(p).toMatch(/^- bleeding: .*작은 상처의 피.*none.*안 멈추면 bleeding/m);
     expect(p).toMatch(/^- bleeding: .*음식의 피.*none.*다쳤다는 말이 있을 때만 bleeding/m);
+  });
+});
+
+describe("재확인(confirmEmergencyLLM) — 아님과 모름을 가른다(2026-10-22)", () => {
+  it("사전필터 없이 묻는다 — 정규식이 이미 신호를 찾은 발화다", async () => {
+    generateContent.mockResolvedValue(reply({ category: "none", level: 0 }));
+    await confirmVerdict("오늘 점심에 칼국수 먹었어");   // SOFT_SIGNAL에 안 걸리는 말이어도
+    expect(generateContent).toHaveBeenCalledTimes(1);
+  });
+
+  it("위급이면 emergency", async () => {
+    generateContent.mockResolvedValue(reply({ category: "medical_acute", level: 3 }));
+    const v = await confirmVerdict("딸이 와서 보더니 내 입이 돌아갔대");
+    expect(v).toMatchObject({ kind: "emergency", result: { level: 3, category: "medical_acute" } });
+  });
+
+  it.each([
+    [{ category: "none", level: 0 }],
+    [{ category: "fall_injury", level: 1 }],
+  ])("'아님'은 none — L2 미만이면 분류와 무관: %j", async (out) => {
+    generateContent.mockResolvedValue(reply(out));
+    expect(await confirmVerdict("친구가 넘어져서 다쳤대")).toEqual({ kind: "none" });
+  });
+
+  // 1000자 초과도 이제 근거가 있으면 창으로 묻는다(아래 '재확인 창') — 여기 "가".repeat(1001)이 모름인 까닭은 근거가 없어서다
+  it("모름은 error — 장애·빈 응답·깨진 JSON·모르는 분류·키 없음·근거 없는 긴 글", async () => {
+    // 🔒 모름을 none으로 읽으면 재확인이 장애 때 진짜 위급을 내린다(호출부는 error면 정규식 L3를 지킨다)
+    generateContent.mockRejectedValue(new Error("deadline exceeded"));
+    expect(await confirmVerdict("딸이 와서 보더니 내 입이 돌아갔대")).toEqual({ kind: "error" });
+    generateContent.mockResolvedValue({});
+    expect(await confirmVerdict("딸이 와서 보더니 내 입이 돌아갔대")).toEqual({ kind: "error" });
+    generateContent.mockResolvedValue({ text: "JSON 아님" });
+    expect(await confirmVerdict("딸이 와서 보더니 내 입이 돌아갔대")).toEqual({ kind: "error" });
+    generateContent.mockResolvedValue(reply({ category: "depression", level: 3 }));
+    expect(await confirmVerdict("딸이 와서 보더니 내 입이 돌아갔대")).toEqual({ kind: "error" });
+    expect(await confirmVerdict("가".repeat(1001))).toEqual({ kind: "error" });
+    delete process.env.GEMINI_API_KEY;
+    generateContent.mockClear();
+    expect(await confirmVerdict("딸이 와서 보더니 내 입이 돌아갔대")).toEqual({ kind: "error" });
+    expect(generateContent).not.toHaveBeenCalled();
+  });
+
+  it("기존 백스톱(detectEmergencyLLM)은 그대로 — 모름도 null", async () => {
+    generateContent.mockResolvedValue(reply({ category: "depression", level: 3 }));
+    expect(await detect("죽고 싶다는 생각이 드네")).toBeNull();
+    generateContent.mockResolvedValue({});
+    expect(await detect("약을 한 움큼 삼켰으면 좋겠어")).toBeNull();
+  });
+});
+
+describe("재확인 창 — 600자를 넘으면 정규식 근거 둘레만 싣는다(2026-10-22 저녁)", () => {
+  /** 맨 앞에만 있는 표지 — 창이 근거 둘레로 잘렸는지 본다 */
+  const HEAD = "앞머리표지";
+  const FILLER = "오늘 점심에 칼국수 먹었어 ";
+  /** 맨 끝의 증상 — 정규식 근거('입이 돌아갔')가 여기 있다. 앞의 '드라마'가 맥락 가드다 */
+  const TAIL = "근데 지금 갑자기 입이 돌아갔어";
+  function longTalk(minLength: number): string {
+    let s = `${HEAD} 드라마 이야기 좀 할게 `;
+    while (s.length + TAIL.length < minLength) s += FILLER;
+    return s + TAIL;
+  }
+  /** 호출부(detectWithBackstop)가 넘기는 값 그대로 — 정규식이 실제로 돌려준 근거 */
+  function evidenceOf(text: string): string {
+    const { suppressed } = detectEmergencyDetailed(text);
+    expect(suppressed, "전제: 맥락 가드(드라마)가 지운 L3가 있어야 한다").toBeDefined();
+    return suppressed!.evidence;
+  }
+  const promptAt = (i: number) => generateContent.mock.calls[i][0].contents as string;
+
+  it("700자쯤이면 근거 둘레를 싣는다 — 증상은 프롬프트에 있고 맨 앞 표지는 없다", async () => {
+    const text = longTalk(700);
+    expect(text.length).toBeGreaterThan(600);
+    expect(text.length).toBeLessThan(800);
+    const ev = evidenceOf(text);
+    generateContent.mockResolvedValue(reply({ category: "medical_acute", level: 3 }));
+    await confirmVerdict(text, ev);
+    const p = promptAt(0);
+    // 🔒 예전처럼 앞 600자만 실으면 "드라마 이야기 …(600자 넘게)… 근데 지금 갑자기 입이 돌아갔어"의 증상이 프롬프트에 없어
+    //    백스톱의 '아님'에 L3가 내려갔다
+    expect(p).toContain(ev);
+    expect(p).toContain(TAIL);
+    expect(p).not.toContain(HEAD);
+  });
+
+  it("1000자를 넘어도 근거가 있으면 묻는다 — 예전엔 묻지도 않고 모름(긴 드라마 이야기도 119 안내)이었다", async () => {
+    const text = longTalk(1200);
+    expect(text.length).toBeGreaterThanOrEqual(1200);
+    const ev = evidenceOf(text);
+    generateContent.mockResolvedValue(reply({ category: "medical_acute", level: 3 }));
+    const v = await confirmVerdict(text, ev);
+    expect(generateContent).toHaveBeenCalledTimes(1);
+    expect(v).toMatchObject({ kind: "emergency", result: { level: 3 } });
+    expect(promptAt(0)).toContain(ev);
+  });
+
+  it("600자를 넘는데 근거가 없거나 글에 없으면 모름(error) — Gemini를 부르지 않는다", async () => {
+    const text = longTalk(700);
+    generateContent.mockResolvedValue(reply({ category: "none", level: 0 }));
+    // 🔒 근거 없이 아무 데나 잘라 물으면 증상이 빠진 창의 '아님'에 L3가 내려간다 — 모름이면 호출부가 정규식 L3를 지킨다
+    expect(await confirmVerdict(text)).toEqual({ kind: "error" });
+    expect(await confirmVerdict(text, "피가 철철")).toEqual({ kind: "error" });
+    expect(generateContent).not.toHaveBeenCalled();
+  });
+
+  it("600자 이하는 근거와 무관하게 글 전체를 싣는다(경계 600자)", async () => {
+    const END = "끝자리표지";
+    const text = (`${HEAD} ` + FILLER.repeat(60)).slice(0, 600 - END.length) + END;
+    expect(text.length).toBe(600);
+    generateContent.mockResolvedValue(reply({ category: "none", level: 0 }));
+    await confirmVerdict(text);
+    await confirmVerdict(text, "글에 없는 근거");
+    // 🔒 경계를 600 미만으로 잡으면 600자 발화가 창 경로로 가서, 근거가 없을 때 묻지도 못하고 모름이 된다
+    expect(generateContent).toHaveBeenCalledTimes(2);
+    expect(promptAt(0)).toContain(text);
+    expect(promptAt(1)).toContain(text);
+  });
+});
+
+describe("재확인 응답 해석 — 등급이 숫자가 아니면 모름(2026-10-22 저녁)", () => {
+  const STROKE = "딸이 와서 보더니 내 입이 돌아갔대";
+
+  it.each([
+    ["level 빠짐", reply({ category: "medical_acute" })],
+    ["level null", reply({ category: "medical_acute", level: null })],
+    ['level "high"', reply({ category: "medical_acute", level: "high" })],
+    ["배열 JSON", reply([{ category: "medical_acute", level: 3 }])],
+    ["숫자 JSON", reply(3)],
+  ])("%s → 모름(error) — 예전엔 0(아님)으로 읽어 재확인이 정규식 L3를 버렸다", async (_label, res) => {
+    generateContent.mockResolvedValue(res);
+    // 🔒 아님(none)으로 읽으면 호출부가 가드에 걸린 진짜 위급(뇌졸중)을 내린다 — 모름이어야 정규식 L3를 지킨다
+    expect(await confirmVerdict(STROKE)).toEqual({ kind: "error" });
+  });
+
+  it('level 문자열 "3" + bleeding → 위급 L3 출혈', async () => {
+    generateContent.mockResolvedValue(reply({ category: "bleeding", level: "3" }));
+    // 🔒 숫자만 받으면 스키마를 벗어난 "3"이 모름이 된다 — 재확인은 지키지만 사전필터 백스톱은 이 위급을 놓친다
+    expect(await confirmVerdict(STROKE)).toEqual({
+      kind: "emergency", result: { level: 3, category: "bleeding", evidence: expect.stringMatching(/^llm:/) },
+    });
+  });
+
+  it("사전필터 백스톱(detectEmergencyLLM)은 level이 빠지면 null", async () => {
+    generateContent.mockResolvedValue(reply({ category: "medical_acute" }));
+    expect(await detect("피가 멈추질 않아")).toBeNull();
+    expect(generateContent).toHaveBeenCalledTimes(1);   // 사전필터를 지나 실제로 물었다 — 응답을 못 읽어 null이다
+  });
+});
+
+describe("모름 로그 — 까닭만 남기고 발화는 남기지 않는다(2026-10-22 저녁)", () => {
+  /** 로그 인자를 글로 — 오류는 이름·메시지까지, 객체는 JSON으로 펼쳐 발화가 숨어 있는지 본다 */
+  const asText = (a: unknown) => (typeof a === "string" ? a : a instanceof Error ? `${a.name}: ${a.message}` : JSON.stringify(a));
+
+  it("모름이면 console.warn을 부르고, 그 인자에 발화 글이 없다(오류 메시지에 발화가 섞여 와도)", async () => {
+    const UTTER = "딸이 와서 보더니 내 입이 돌아갔대";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      generateContent.mockRejectedValueOnce(new Error(`upstream rejected: ${UTTER}`));    // 장애 — 오류 메시지에 발화가 실려 온다
+      expect(await confirmVerdict(UTTER)).toEqual({ kind: "error" });
+      generateContent.mockResolvedValueOnce(reply({ category: "medical_acute" }));        // 응답 형식(등급 없음)
+      expect(await confirmVerdict(UTTER)).toEqual({ kind: "error" });
+      generateContent.mockResolvedValueOnce(reply({ category: "depression", level: 3 }));  // 모르는 분류
+      expect(await confirmVerdict(UTTER)).toEqual({ kind: "error" });
+      delete process.env.GEMINI_API_KEY;                                                    // 키 없음
+      expect(await confirmVerdict(UTTER)).toEqual({ kind: "error" });
+      // 🔒 모름이 소리 없이 쌓이면 모델이 바뀌어 매번 잘려도(가드에 걸린 이야기가 전부 L3) 아무도 모른다 — 경고는 남긴다
+      expect(warn).toHaveBeenCalledTimes(4);
+      for (const args of warn.mock.calls) {
+        const line = args.map(asText).join(" ");
+        expect(line).toContain("백스톱 모름");
+        // 🔒 운영 로그에 어르신 발화(건강정보)가 남으면 안 된다 — 까닭(오류 이름·응답 형식·키 없음)만
+        expect(line).not.toContain("입이 돌아갔");
+        expect(line).not.toContain("딸이 와서");
+      }
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

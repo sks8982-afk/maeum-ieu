@@ -112,6 +112,19 @@ describe("L3 멘트 — 어르신이 실제로 듣는 문장", () => {
       expect(buildEmergencyL3Reply("할머니", "민지", cat)).toContain("119");
     });
 
+  it("[bleeding] 119는 조건 없이 맨 앞 — 지혈은 다친 곳·코피일 때만 따로 말한다(몸속 출혈에도 이 멘트가 나간다, 2026-10-22)", () => {
+    const r = buildEmergencyL3Reply("할머니", "민지", "bleeding");
+    const first = r.slice(0, r.indexOf("."));
+    // 🔒 "상처에서 나는 피면 …눌러주시고, 바로 119에"처럼 한 문장에 묶으면 119까지 '상처면' 조건으로 들린다 —
+    //    피를 토하거나 혈변인 어르신은 119를 자기 일로 듣지 못한다
+    expect(first).toContain("119");
+    expect(first.slice(0, first.indexOf("119")), "119 앞에 조건('…면')이 없어야 한다").not.toMatch(/[가-힣]면[\s,]/);
+    // 🔒 "깨끗한 수건으로 꾹"만 있으면 피를 토한 어르신에게 맞지 않는 지시가 된다 — 다친 곳일 때만
+    expect(r).toContain("다친 곳이면 깨끗한 수건으로 꾹");
+    expect(r).toContain("코피면");
+    expect(r).toMatch(/가족이나 보호자/);
+  });
+
   it("[suicidal]은 119가 아니라 자살예방상담 109를 안내한다", () => {
     const r = buildEmergencyL3Reply("할머니", "민지", "suicidal");
     // 🔒 자살 위기에 119만 안내하면 적절한 창구로 연결되지 않는다

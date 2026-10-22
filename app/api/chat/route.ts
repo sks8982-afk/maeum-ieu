@@ -29,7 +29,7 @@ import { randomUUID } from "crypto";
 import { buildExamPlan, renderDomainBattery, scoreDomainAnswer, isNonResponse, renderDomainReask, itemsForDomain } from "@/lib/screening/exam-runner";
 import { classifyProvisional, assessCoverage } from "@/lib/screening/exam-eval";
 import { detectInappropriate, buildModerationReply, isPastResolvedSelfHarm, buildPastSelfHarmReply } from "@/lib/chat/moderation";
-import { detectEmergency, buildEmergencyL3Reply, type EmergencyResult } from "@/lib/chat/emergency";
+import { detectEmergencyDetailed, buildEmergencyL3Reply, type EmergencyResult } from "@/lib/chat/emergency";
 import { detectEmergencyLLM } from "@/lib/chat/emergency-llm";
 import { evaluateEmergency } from "@/lib/chat/emergency-evaluate";
 import { evaluateSttConfidence, buildClarificationReply } from "@/lib/chat/stt-confidence";
@@ -1542,7 +1542,9 @@ export async function POST(req: Request) {
          *   비용: SOFT_SIGNAL 사전필터가 평범한 발화를 걸러 호출 자체가 드물고,
          *   한도 초과 턴에만 돈다. 안전 기능은 비용 최적화 대상이 아니다(가이드 §3).
          */
-        let isEmergencyUtterance = spoken ? detectEmergency(spoken).level > 0 : false;
+        //   (2026-10-22) 맥락 가드가 지운 L2+(suppressed)도 응급 후보로 통과시킨다 — 본류가 백스톱 재확인으로 가른다.
+        const spokenDetail = spoken ? detectEmergencyDetailed(spoken) : undefined;
+        let isEmergencyUtterance = !!spokenDetail && (spokenDetail.result.level > 0 || !!spokenDetail.suppressed);
         if (spoken && !isEmergencyUtterance) {
           const llm = await detectEmergencyLLM(spoken).catch(() => null);
           if (llm) {
@@ -1580,9 +1582,12 @@ export async function POST(req: Request) {
     //   비용: 백스톱은 SOFT_SIGNAL 사전필터를 통과한 발화에서만 LLM을 부른다(평범한 시간 질문은 0).
     //   ⚠ 정규식이 L1 이상이면 백스톱 없이 바로 일반 경로로 — detectWithBackstop은 L1에서도 LLM을 부르는데(2026-10-19),
     //   L1은 0이 될 수 없어 이 게이트에서는 헛호출이고 본류(evaluateEmergency)가 한 번 더 부른다(블로킹 2회).
-    if (!isAudio && lastUserMessage && isDateTimeQuestion(lastUserMessage)
+    //   (2026-10-22) 맥락 가드가 지운 L2+(suppressed)가 있으면 즉답하지 않고 본류로 — 본류가 백스톱 재확인으로 가른다.
+    //   판정은 시각 질문일 때만 돌린다 — 모든 텍스트 요청에서 먼저 돌면 본류 판정과 합쳐 정규식이 두 번 돈다(같은 날 저녁 검토).
+    const timeQuestionDetail = !isAudio && lastUserMessage && isDateTimeQuestion(lastUserMessage) ? detectEmergencyDetailed(lastUserMessage) : undefined;
+    if (timeQuestionDetail && lastUserMessage
       && detectInappropriate(lastUserMessage).category === "ok"
-      && detectEmergency(lastUserMessage).level === 0
+      && timeQuestionDetail.result.level === 0 && !timeQuestionDetail.suppressed
       && !(await detectEmergencyLLM(lastUserMessage).catch(() => null))) {
       return handleDateTimeQuestion(lastUserMessage, honorific, conversationId, userId, ctx?.currentTime);
     }

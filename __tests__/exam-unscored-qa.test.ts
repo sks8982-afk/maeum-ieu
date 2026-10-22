@@ -33,7 +33,7 @@ vi.mock("@/lib/chat/prompt", async (o) => ({
 }));
 vi.mock("@/lib/chat/prompt-cache", () => ({ getPrefixCache: vi.fn(async () => null) }));
 vi.mock("@/lib/rag", () => ({ searchMemories: vi.fn(async () => []), saveMessageEmbedding: vi.fn(async () => {}) }));
-vi.mock("@/lib/chat/emergency-llm", () => ({ detectEmergencyLLM: vi.fn(async () => null) }));
+vi.mock("@/lib/chat/emergency-llm", () => ({ detectEmergencyLLM: vi.fn(async () => null), confirmEmergencyLLM: vi.fn(async () => ({ kind: "none" })) }));
 vi.mock("@/lib/chat/messages", async (o) => ({ ...(await o<typeof import("@/lib/chat/messages")>()), saveMessages: vi.fn(async () => ({ userMsgId: "m-u", assistantMsgId: "m-a" })), countRecentL1Signals: vi.fn(async () => 0) }));
 let unscored = true;
 vi.mock("@/lib/screening/exam-runner", async (o) => {

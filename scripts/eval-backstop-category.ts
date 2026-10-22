@@ -5,13 +5,14 @@
  *   어르신 안내가 "움직이지 마시고"로 나갔다(출혈이면 "깨끗한 수건으로 꾹 눌러" — buildEmergencyL3Reply).
  *   분류는 LLM 판단이라 모의 응답을 쓰는 단위 시험으로는 잡을 수 없다. 프롬프트를 바꿀 때마다 이걸로 전후를 잰다.
  *
- * 실행: npx tsx scripts/eval-backstop-category.ts [반복 횟수=3] [결과 JSON 경로]
+ * 실행: npx tsx scripts/eval-backstop-category.ts [반복 횟수=3] [결과 JSON 경로] [추가 문장 JSON] [confirm]
  *   GEMINI_API_KEY가 있어야 한다(.env). 운영 DB는 읽지 않는다.
  *   LLM 장애·시간 초과도 null이라 "none"으로 보인다 — 한 번만 어긋난 줄은 다시 돌려 본다.
+ *   끝에 confirm을 주면 재확인 경로(confirmEmergencyLLM — 사전필터 없이 묻고, 모름은 "error"로 따로 센다)로 잰다.
  */
 import "dotenv/config";
 import { readFileSync, writeFileSync } from "node:fs";
-import { detectEmergencyLLM, SOFT_SIGNAL } from "../lib/chat/emergency-llm";
+import { confirmEmergencyLLM, detectEmergencyLLM, SOFT_SIGNAL } from "../lib/chat/emergency-llm";
 import { normalizeForBackstop } from "../lib/chat/emergency";
 
 type Expect = "bleeding" | "fall_injury" | "medical_acute" | "suicidal" | "medication_error" | "none";
@@ -99,7 +100,9 @@ const CASES: Case[] = [
 const RUNS = Number(process.argv[2]) || 3;
 const OUT = process.argv[3];
 /** 덧붙일 시험 문장 JSON([{ group, text, expect }]) — 검토자가 만든 문장을 같은 기준으로 돌릴 때 */
-const EXTRA = process.argv[4];
+const EXTRA = process.argv[4] && process.argv[4] !== "-" ? process.argv[4] : undefined;
+/** 재확인 경로로 잰다 — 사전필터 없이 묻고 '모름'(장애·시간 초과·파싱 실패)을 "error"로 따로 센다 */
+const CONFIRM = process.argv[5] === "confirm";
 const CONCURRENCY = 6;
 const allowed = (c: Case): Expect[] => (Array.isArray(c.expect) ? c.expect : [c.expect]);
 
@@ -117,6 +120,10 @@ async function main() {
   const cases: Case[] = EXTRA ? [...CASES, ...(JSON.parse(readFileSync(EXTRA, "utf8")) as Case[])] : CASES;
   const jobs = cases.flatMap((_, idx) => Array.from({ length: RUNS }, () => idx));
   const results = await pool(jobs, CONCURRENCY, async (idx) => {
+    if (CONFIRM) {
+      const v = await confirmEmergencyLLM(cases[idx].text);
+      return v.kind === "emergency" ? { idx, got: v.result.category as string, level: v.result.level as number } : { idx, got: v.kind as string, level: 0 };
+    }
     const r = await detectEmergencyLLM(cases[idx].text);
     return { idx, got: r ? r.category : "none", level: r?.level ?? 0 };
   });

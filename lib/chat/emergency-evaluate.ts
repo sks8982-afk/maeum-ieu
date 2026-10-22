@@ -19,8 +19,8 @@
  *   - 집계 조회가 실패하면 승격하지 않는다(다음 L1에서 다시 평가). 집계 실패로 발화 처리
  *     전체가 무너지면 L2·L3 안전망까지 같이 잃기 때문이다.
  */
-import { detectEmergency, buildEmergencyL2Hint, shouldEscalateL1ToL2, type EmergencyResult } from "./emergency";
-import { detectEmergencyLLM } from "./emergency-llm";
+import { detectEmergencyDetailed, buildEmergencyL2Hint, shouldEscalateL1ToL2, type EmergencyResult } from "./emergency";
+import { confirmEmergencyLLM, detectEmergencyLLM } from "./emergency-llm";
 import { countRecentL1Signals } from "./messages";
 
 export interface EmergencyEvaluation {
@@ -39,11 +39,27 @@ export interface EmergencyEvaluation {
  *   ⚠ (2026-10-19) 예전엔 none일 때만 불렀다. 그래서 "기운이 하나도 없고 숨이 너무 차"·"입맛이 하나도 없고 피를 토했어"처럼
  *   앞의 L1(관찰) 표현이 잡히면 뒤의 급성 신호가 있어도 백스톱이 아예 안 불렸다(독립 검토). 백스톱은 L2 이상만 돌려주므로
  *   L1을 태워도 올리기만 하고, 백스톱이 아니라고 하면 L1을 그대로 둔다(누적 승격은 2단계가 그대로 한다).
+ *   (2026-10-22) **재확인** — 정규식이 L2+를 찾았는데 맥락 가드(남의 이야기·지난 일·꿈·TV·화투·음식 손질·관용·손주의 가벼운 상처)가
+ *   지웠으면(suppressed) 사전필터 없이 백스톱에 다시 묻는다. '아님'일 때만 내리고, 위급이거나 **모름(키 없음·장애·시간 초과·파싱
+ *   실패)이면 정규식 판정을 지킨다**. 예전엔 가드가 지우면 사전필터에 걸린 말만 백스톱이 받았고 백스톱이 실패하면 알림이 사라졌다
+ *   ("TV 보다가 갑자기 입이 돌아갔어"는 사전필터에도 없어 알림 0). 실측: 맥락 낱말이 섞인 진짜 위급 80문장 × 3회를 모두 위급으로
+ *   봤고(240/240), 이야기 60문장은 157/180을 '아님'으로 봤다(scripts/eval-backstop-category.ts … confirm).
  */
 export async function detectWithBackstop(userContent: string): Promise<EmergencyResult> {
-  const result = detectEmergency(userContent);
+  const { result, suppressed } = detectEmergencyDetailed(userContent);
+  // 가드가 지운 판정은 가드 켠 결과가 L1·L2여도 먼저 다시 묻는다 — L2에서 멈추면 지워진 L3가 재확인 없이 L2로 내려갔다(10-22 저녁 검토)
+  if (suppressed) {
+    const verdict = await confirmEmergencyLLM(userContent, suppressed.evidence).catch(() => ({ kind: "error" as const }));
+    if (verdict.kind === "none") return result;
+    // 위급이면 정규식 판정(근거·분류)을 쓰되 백스톱이 더 높게 보면 그쪽 — 모름이면 정규식 판정을 지킨다.
+    //   백스톱 등급을 그대로 쓰지 않는 까닭(10-22 실측): 맥락 낱말이 섞인 진짜 위급 240회 중 43회를 백스톱이 '위급이지만 L2'로 봤다
+    //   ("며느리가 내 발음이 이상하대"·"딸이 그러는데 아까 내가 약을 두 번 먹었대" — 뇌졸중 징후·과다 복용은 119 안내가 바로 나가야 한다).
+    //   대신 이야기에 백스톱이 L2라고 한 것도 L3로 나간다(이야기 180회 중 17회) — 안전 쪽을 골랐다.
+    return verdict.kind === "emergency" && verdict.result.level > suppressed.level ? verdict.result : suppressed;
+  }
   if (result.level >= 2) return result;
-  return (await detectEmergencyLLM(userContent)) ?? result;
+  // 백스톱이 throw해도 정규식 판정으로 — 최후 안전망도 이 함수를 쓴다(거기서 예외가 새면 안전망째 무너진다)
+  return (await detectEmergencyLLM(userContent).catch(() => null)) ?? result;
 }
 
 /**

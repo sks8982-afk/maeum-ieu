@@ -3,7 +3,7 @@
  *
  * 테스트 성격
  *  - 화이트박스 단위: SSRF 가드(isSafeWebhookUrl 경유), 중복 차단 규칙, 페이로드 구성
- *  - 통합: detectEmergency → notifyGuardian → DB(notifiedAt) → ExpertPatient 링크(FCM 대상 조회)
+ *  - 통합: detectWithBackstop → notifyGuardian → DB(notifiedAt) → ExpertPatient 링크(FCM 대상 조회)
  *  - 인수 시나리오: L2(주의) 발생 후 같은 카테고리 L3(즉시응급) 격상이 억제되지 않는가
  *  - 프라이버시: 보호자 조회 API가 대화 원문을 주지 않는가
  *
@@ -15,8 +15,7 @@
 import "dotenv/config";
 import { prisma } from "../lib/prisma";
 import { notifyGuardian } from "../lib/chat/emergency-notify";
-import { detectEmergency } from "../lib/chat/emergency";
-import { detectEmergencyLLM } from "../lib/chat/emergency-llm";
+import { detectWithBackstop } from "../lib/chat/emergency-evaluate";
 import { encryptPII } from "../lib/crypto";
 
 const ELDER = "notifytest.elder@maeum.test";
@@ -114,13 +113,9 @@ async function main() {
     ["손녀랑 통화해서 기분이 좋아", 0],
   ];
   for (const [u, expect] of cases) {
-    let d = detectEmergency(u);
-    let via = "정규식";
-    // 본류(detectWithBackstop)와 같게 — 정규식이 L2 미만(none·L1)이면 백스톱(2026-10-19)
-    if (d.level < 2) {
-      const llm = await detectEmergencyLLM(u);
-      if (llm) { d = llm; via = "LLM 백스톱"; }
-    }
+    // 본류와 같은 함수를 쓴다 — 정규식 → 맥락 가드 재확인 → 백스톱. 따로 복사해 두면 한쪽만 고쳐진다(10-22: 복사본에 재확인이 없었다)
+    const d = await detectWithBackstop(u);
+    const via = d.evidence.startsWith("llm:") ? "LLM 백스톱" : "정규식";
     check(`"${u.slice(0, 22)}…" → L${d.level} [${via}] (기대 ${expect === 0 ? "0" : `${expect}+`})`,
       expect === 0 ? d.level === 0 : d.level >= expect, `실제 L${d.level}`);
   }

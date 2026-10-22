@@ -67,9 +67,12 @@ vi.mock("@/lib/chat/llm", async (importOriginal) => {
   };
 });
 const backstop = vi.fn<(text: string) => Promise<EmergencyResult | null>>(async () => null);
+/** 맥락 가드가 지운 L2+의 재확인(2026-10-22) — 진짜 Gemini를 부르지 않게 모의한다. 기본은 '아님' */
+type Verdict = { kind: "emergency"; result: EmergencyResult } | { kind: "none" } | { kind: "error" };
+const confirm = vi.fn<(text: string) => Promise<Verdict>>(async () => ({ kind: "none" }));
 vi.mock("@/lib/chat/emergency-llm", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/lib/chat/emergency-llm")>();
-  return { ...mod, detectEmergencyLLM: (t: string) => backstop(t) };
+  return { ...mod, detectEmergencyLLM: (t: string) => backstop(t), confirmEmergencyLLM: (t: string) => confirm(t) };
 });
 const notifyGuardian = vi.fn(async () => {});
 vi.mock("@/lib/chat/emergency-notify", async (importOriginal) => {
@@ -85,7 +88,7 @@ vi.mock("@/lib/chat/messages", async (importOriginal) => {
 });
 
 const { POST } = await import("@/app/api/chat/route");
-const { detectEmergency } = await import("@/lib/chat/emergency");
+const { detectEmergency, detectEmergencyDetailed } = await import("@/lib/chat/emergency");
 const { isDateTimeQuestion } = await import("@/lib/chat/time");
 
 async function say(content: string) {
@@ -108,6 +111,8 @@ beforeEach(() => {
   convLookups.length = 0;
   backstop.mockReset();
   backstop.mockImplementation(async () => null);
+  confirm.mockReset();
+  confirm.mockImplementation(async () => ({ kind: "none" }));
   notifyGuardian.mockClear();
   saveMessages.mockClear();
 });
@@ -146,11 +151,56 @@ describe("텍스트 날짜·시간 단락이 백스톱 응급을 삼키지 않�
     expect(llmCalls).toEqual([]);
   });
 
+  it("맥락 가드가 지운 L3가 섞인 시간 질문은 즉답하지 않는다 — 본류가 재확인한다(2026-10-22)", async () => {
+    const GUARDED_TIME = "지금 몇 시야? 딸이 와서 보더니 내 입이 돌아갔대";
+    expect(isDateTimeQuestion(GUARDED_TIME)).toBe(true);
+    expect(detectEmergency(GUARDED_TIME).level).toBe(0);   // 가족 전언 가드가 지운다
+    confirm.mockImplementation(async () => ({ kind: "error" }));   // 재확인이 모름 → 정규식 L3를 지킨다
+    const r = await say(GUARDED_TIME);
+    expect(r.status).toBe(200);
+    // 🔒 게이트가 정규식만 보면 "한국 시각으로 …"로 끝나 뇌졸중 신호가 사라진다
+    expect(String(r.body.text)).not.toMatch(/한국 시각으로/);
+    expect(confirm).toHaveBeenCalled();
+    expect(notifyGuardian).toHaveBeenCalled();
+  });
+
   it("평범한 시간 질문은 그대로 즉답한다 (백스톱 none)", async () => {
     const r = await say("지금 몇 시야?");
     expect(r.status).toBe(200);
     expect(String(r.body.text)).toMatch(/한국 시각으로/);
     expect(notifyGuardian).not.toHaveBeenCalled();
+    expect(llmCalls).toEqual([]);
+  });
+
+  it("게이트의 응급 판정은 시각 질문일 때만 돈다 — 소스 고정(2026-10-22 저녁)", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const src = await readFile("app/api/chat/route.ts", "utf-8");
+    // 🔒 판정을 먼저 돌리고 게이트 조건에서 시각 질문을 보면 응답은 같고 모든 텍스트 요청에서 정규식이 두 번 돈다(본류 판정과 합쳐) —
+    //    행위가 같아 위 시험들로는 안 잡힌다
+    expect(src).toMatch(/timeQuestionDetail = [^;]*isDateTimeQuestion\(lastUserMessage\)\s*\?\s*detectEmergencyDetailed\(lastUserMessage\)/);
+  });
+});
+
+describe("일일 한도 초과여도 맥락 가드가 지운 L3는 막지 않는다 (2026-10-22)", () => {
+  // 가족 전언 주어 + '-대' — 가드 켠 정규식은 0, 가드가 지운 판정은 L3 뇌졸중(입이 돌아감). 어르신 본인의 일이다
+  const FAMILY_REPORTED = "딸이 와서 보더니 내 입이 돌아갔대";
+
+  it("전제: 가드 켠 판정은 0, 가드가 지운 판정은 L3 — 시간 질문도 아니다", () => {
+    expect(detectEmergencyDetailed(FAMILY_REPORTED)).toMatchObject({ result: { level: 0 }, suppressed: { level: 3 } });
+    expect(isDateTimeQuestion(FAMILY_REPORTED)).toBe(false);
+  });
+
+  it("한도 초과 + 재확인 모름(error) → 마무리 인사가 아니라 L3 응답·보호자 알림·응급 마킹", async () => {
+    msgCount = 500;
+    confirm.mockImplementation(async () => ({ kind: "error" }));   // 재확인이 모름 → 정규식 L3를 지킨다
+    const r = await say(FAMILY_REPORTED);
+    expect(r.status).toBe(200);
+    // 🔒 한도 게이트가 가드 켠 판정(0)만 보면 사전필터 백스톱(null)을 거쳐 "내일 또 만나요" 마무리 인사로 끝난다 — 뇌졸중 신호가 사라진다
+    expect(r.body.dailyLimitReached).toBeUndefined();
+    expect(String(r.body.text)).toContain("119");
+    expect(confirm).toHaveBeenCalled();
+    expect(notifyGuardian).toHaveBeenCalled();
+    expect(saveMessages.mock.calls.some(([p]) => p.emergencyLevel === 3), "응급 마킹(emergencyLevel 3) 저장").toBe(true);
     expect(llmCalls).toEqual([]);
   });
 });

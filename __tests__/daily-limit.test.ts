@@ -205,7 +205,9 @@ describe("라우트 게이트 계약", () => {
   it("응급 발화는 한도보다 우선한다 — 음성은 전사를 기다린 뒤 판정한다", () => {
     // 🔒 실서비스는 음성 전용. 전사 없이 판정하면 "숨이 안 쉬어져"가 마무리 인사로 덮인다.
     expect(gate).toMatch(/usage\.exceeded[\s\S]{0,700}await sttPromise[\s\S]{0,200}detectEmergency/);
-    expect(gate).toMatch(/detectEmergency\(spoken\)[\s\S]{0,900}if \(!isEmergencyUtterance\)/);
+    expect(gate).toMatch(/detectEmergencyDetailed\(spoken\)[\s\S]{0,900}if \(!isEmergencyUtterance\)/);
+    // 🔒 맥락 가드가 지운 L2+(suppressed)도 응급 후보로 통과 — 본류가 백스톱 재확인으로 가른다(2026-10-22)
+    expect(gate).toMatch(/isEmergencyUtterance = [^;]*\.suppressed/);
   });
 
   it("정규식이 none이면 LLM 백스톱까지 본 뒤에 차단한다", () => {
