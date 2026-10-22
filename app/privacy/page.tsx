@@ -26,7 +26,7 @@ import {
  */
 export const metadata = { title: "개인정보처리방침 · 마음이음" };
 
-const UPDATED = "2026년 10월 22일";
+const UPDATED = "2026년 10월 23일";
 /** 앞선 개정 — 변경 내역(15항)에 그 날짜로 남긴다 */
 const REVISED_OCT_8 = "2026년 10월 8일";
 const REVISED_OCT_6 = "2026년 10월 6일";
