@@ -164,6 +164,36 @@ describe("호출 설정 — 비용·정확도에 직결되는 파라미터 고�
   });
 });
 
+describe("프롬프트 카테고리 정의 — 분류가 L3 안내 문구를 고른다(2026-10-22)", () => {
+  async function promptOf(text: string): Promise<string> {
+    generateContent.mockResolvedValue(reply({ category: "none", level: 0 }));
+    await detect(text);
+    return generateContent.mock.calls[0][0].contents as string;
+  }
+
+  it("bleeding은 낙상 줄에 붙지 않고 제 줄에 정의된다", async () => {
+    const p = await promptOf("피나요");
+    // 🔒 "- fall_injury: …. bleeding: 멈추지 않는 출혈."처럼 한 줄에 붙어 있으면 모델이 bleeding을 한 번도 고르지 않았다
+    //    (실측 출혈 66회 모두 fall_injury → 어르신 안내가 "움직이지 마시고"로 나가 지혈 안내가 빠졌다)
+    expect(p).toMatch(/^- bleeding: /m);
+    expect(p).not.toMatch(/^- fall_injury:.*bleeding/m);
+    expect(p).toMatch(/^- bleeding: .*맨 "피나요"/m);
+  });
+
+  it("낙상이 섞이면 fall_injury, 몸속 출혈 신호는 medical_acute", async () => {
+    const p = await promptOf("피나요");
+    expect(p).toMatch(/^- fall_injury: .*낙상과 함께 피가 나도 fall_injury/m);   // 정규식도 낙상 규칙이 출혈보다 먼저다
+    expect(p).toMatch(/^- medical_acute: .*(?:토혈|각혈|혈변).*medical_acute/m);   // 피를 토한 어르신에게 "수건으로 꾹"은 맞지 않는다
+  });
+
+  it("작은 상처·음식의 피는 none — 단 안 멈추거나 본인이 다쳤으면 bleeding", async () => {
+    const p = await promptOf("피나요");
+    // 🔒 bleeding을 넓힌 뒤 "면도하다 살짝 베여서 피가 났어"·"모기 물린 데 긁었더니 피 났네"가 L2(보호자 알림)로 떴다
+    expect(p).toMatch(/^- bleeding: .*작은 상처의 피.*none.*안 멈추면 bleeding/m);
+    expect(p).toMatch(/^- bleeding: .*음식의 피.*none.*다쳤다는 말이 있을 때만 bleeding/m);
+  });
+});
+
 describe("점·쉼표 띄어쓰기 — 사전필터를 정규식과 같은 정규화로 본다(2026-10-19)", () => {
   it("'..'로 띄운 '숨이..너무..차'도 LLM을 부른다", async () => {
     generateContent.mockResolvedValue(reply({ category: "medical_acute", level: 3 }));
