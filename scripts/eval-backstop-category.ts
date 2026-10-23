@@ -12,8 +12,7 @@
  */
 import "dotenv/config";
 import { readFileSync, writeFileSync } from "node:fs";
-import { confirmEmergencyLLM, detectEmergencyLLM, SOFT_SIGNAL } from "../lib/chat/emergency-llm";
-import { normalizeForBackstop } from "../lib/chat/emergency";
+import { confirmEmergencyLLM, detectEmergencyLLM, passesBackstopPrefilter } from "../lib/chat/emergency-llm";
 
 type Expect = "bleeding" | "fall_injury" | "medical_acute" | "suicidal" | "medication_error" | "none";
 /** 허용 카테고리가 여럿이면 배열(머리 부상처럼 안내가 둘 다 맞는 경우) */
@@ -136,7 +135,7 @@ async function main() {
       tally.set(key, (tally.get(key) ?? 0) + 1);
     }
     const ok = mine.filter((r) => (allowed(c) as string[]).includes(r.got)).length;
-    const skipped = !SOFT_SIGNAL.test(normalizeForBackstop(c.text));
+    const skipped = !passesBackstopPrefilter(c.text);
     return { ...c, ok, runs: mine.length, skipped, tally: Object.fromEntries(tally) };
   });
 

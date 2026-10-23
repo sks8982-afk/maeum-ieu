@@ -81,6 +81,7 @@ export async function evaluateEmergency(params: {
 }): Promise<EmergencyEvaluation> {
   const result = await detectWithBackstop(params.userContent);
   const effectiveLevel = await applyL1Escalation(result, params.conversationId);
-  const hint = effectiveLevel === 2 ? buildEmergencyL2Hint(result.category, result.evidence) : "";
+  // 발화는 감지기가 본 글 — 화상 말이면 힌트에 식히는 말 한 줄을 더한다(2026-10-23)
+  const hint = effectiveLevel === 2 ? buildEmergencyL2Hint(result.category, result.evidence, params.userContent) : "";
   return { result, effectiveLevel, hint };
 }

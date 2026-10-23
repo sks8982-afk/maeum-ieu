@@ -83,7 +83,7 @@ export async function lastResortEmergency(params: {
   if (result.level < minLevel) return { fired: false, level: result.level, skipped: "below-threshold" };
 
   const level = result.level as 2 | 3;
-  const reply = level === 3 ? buildEmergencyL3Reply(userName, companionName, result.category) : undefined;
+  const reply = level === 3 ? buildEmergencyL3Reply(userName, companionName, result.category, content) : undefined;
 
   try {
     const r = await notifyGuardian({

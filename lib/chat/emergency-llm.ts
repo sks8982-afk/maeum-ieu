@@ -3,7 +3,7 @@
  *
  * 원칙:
  * - 정규식이 L2 미만(none·L1)일 때만 호출되는 "안전 그물"(정규식 대체 아님). L1도 태우는 이유는 emergency-evaluate 주석(2026-10-19).
- * - 사전필터(SOFT_SIGNAL)로 신호 의심 발화에서만 LLM 호출 → 평범한 대화는 비용·지연 0.
+ * - 사전필터(SOFT_SIGNAL·화상 말 — passesBackstopPrefilter)로 신호 의심 발화에서만 LLM 호출 → 평범한 대화는 비용·지연 0.
  * - 장애/미설정/판정불가 시 null 반환 → 정규식만으로 동작(기존과 동일, 더 나빠지지 않음).
  *
  * 배경: 라이브 사이클 + 적대적 검증에서 사투리·완곡어·어순 변형의 자살/과다복용 신호가
@@ -12,7 +12,7 @@
 import { getGenAI, COMPANION_SAFETY_SETTINGS, logUsage, LLM_TIMEOUT_MS, timeoutSignal } from "@/lib/chat/llm";
 import { geminiTuning } from "@/lib/ai/gemini-config";
 import { Type as SchemaType, type Schema } from "@google/genai";
-import { normalizeEmergencyText, normalizeForBackstop, type EmergencyResult, type EmergencyCategory } from "@/lib/chat/emergency";
+import { mentionsBurnWord, normalizeEmergencyText, normalizeForBackstop, type EmergencyResult, type EmergencyCategory } from "@/lib/chat/emergency";
 
 const MODEL = "gemini-2.5-flash";
 
@@ -78,13 +78,32 @@ export type BackstopVerdict =
   | { kind: "error" };
 
 /**
+ * 사전필터 — 이걸 지나야 백스톱(LLM)을 부른다. 측정·회귀 스크립트(measure-backstop·safety-regression·eval-backstop-category)도 이 함수로 본다.
+ *   SOFT_SIGNAL은 점·쉼표·'ㅠㅠ'로 띄운 글도 같이 읽는다(normalizeForBackstop).
+ *   (2026-10-23) 화상 말(mentionsBurnWord)도 연다 — SOFT_SIGNAL의 '데[였여어]'·'뜨거운 물'은 가장 흔한 화상 말("손을 데었어"·"손 뎄어"·
+ *   "덴 데가"·"기름에 데인"·"뜨거운 커피를 쏟았어")을 못 봐서, 정규식 L0인 화상 발화는 백스톱이 아예 불리지 않았다(보호자 알림 0 —
+ *   L3 화상 안내도 나갈 일이 없었다).
+ *   (같은 날 3차) 지금 화상인지 보기 전의 일치로 연다(mentionsBurnWord — 안내는 지금 화상만 보는 mentionsCurrentBurn) — 지금 화상 확인은
+ *   "어제 산 냄비에 손을 데었어"·"얼굴을 데었어 흉터 남으면 어떡해"처럼 지금 데인 말까지 지울 수 있어, 그때 백스톱까지 닫혔다(2차 검토).
+ *   지난·나은 화상 말도 백스톱이 문맥으로 판정한다.
+ *   비용(같은 날 실측): 10-19 위급 말뭉치 70,930줄(일상 765·질문풀 문항 3,888·오탐 53,220 포함)에서 화상 말 때문에 새로 불리는 줄은
+ *   0이다 — 말뭉치의 화상 말 13줄은 이미 SOFT_SIGNAL('데였·화상·뜨거운 물')이 불렀다. 다만 말뭉치에 화상과 비슷한 일상 말이 거의 없어
+ *   0이다 — 비유("그 사람한테 한번 데었어"·"주식으로 데었어")·지난·나은 화상("어제 덴 데가 이제 다 나았어")·남의 일은 새로 불린다(2차 검토가
+ *   고른 화상과 비슷한 일상 말 30문장 중 19 — 2차 21에서 쏟지 말라는 당부가 빠졌다). 새로 불리는 발화마다 응답 전 백스톱이 한 번 돈다
+ *   (실제 Gemini 중앙 약 2초·최대 2.8초 — 지연만 늘고 백스톱은 아님으로 본다).
+ */
+export function passesBackstopPrefilter(text: string): boolean {
+  return SOFT_SIGNAL.test(normalizeForBackstop(text)) || mentionsBurnWord(text);
+}
+
+/**
  * 발화가 응급/위기 신호인지 LLM으로 판정. 정규식이 L2 미만(none·L1)일 때의 백스톱.
  * @returns 위기로 판정되면 EmergencyResult(level≥2), 아니면 null(아님·모름 모두).
  */
 export async function detectEmergencyLLM(userText: string): Promise<EmergencyResult | null> {
   const text = (userText || "").trim();
   if (!text || text.length > 1000) return null;
-  if (!SOFT_SIGNAL.test(normalizeForBackstop(text))) return null; // 신호 없음 → LLM 호출 안 함(점·쉼표·'ㅠㅠ'로 띄운 글도 같이 읽는다)
+  if (!passesBackstopPrefilter(text)) return null; // 신호 없음 → LLM 호출 안 함
   const v = await askBackstop(text);
   return v.kind === "emergency" ? v.result : null;
 }

@@ -13,10 +13,10 @@ import "dotenv/config";
 import { factCheckResponse } from "../lib/chat/fact-checker";
 import { stripRecallAnswerLeak, normalizeImnida } from "../lib/chat/korean-particle";
 import { renderSystemPrompt, sliceProtocolForDomain } from "../lib/chat/constants";
-import { detectEmergency, detectEmergencyDetailed, normalizeForBackstop } from "../lib/chat/emergency";
+import { detectEmergency, detectEmergencyDetailed, buildEmergencyL3Reply, mentionsCurrentBurn } from "../lib/chat/emergency";
 import type { FullProfile } from "../lib/chat/profile";
 import type { CognitiveCheck } from "../lib/chat/types";
-import { SOFT_SIGNAL } from "../lib/chat/emergency-llm";
+import { SOFT_SIGNAL, passesBackstopPrefilter } from "../lib/chat/emergency-llm";
 import { detectInappropriate } from "../lib/chat/moderation";
 import { salvageJsonLeak } from "../lib/chat/sanitize";
 import { cleanName } from "../lib/chat/profile-extractor";
@@ -771,8 +771,8 @@ console.log("\n[A-15] 붙여 쓴 위급 발화");
     check(`${label}: ${t}`, bad.length === 0, bad.map((v) => `"${v}" L${detectEmergency(v).level}`).join(" / "));
   };
   const isBleedL3 = (v: string) => { const r = detectEmergency(v); return r.level === 3 && r.category === "bleeding"; };
-  // 백스톱 입구는 운영과 같이 판정한다 — detectEmergencyLLM이 점·쉼표·'ㅠㅠ'를 공백으로 읽은 뒤 SOFT_SIGNAL을 본다
-  const reachesBackstop = (v: string) => SOFT_SIGNAL.test(normalizeForBackstop(v));
+  // 백스톱 입구는 운영과 같이 판정한다 — detectEmergencyLLM의 사전필터 그대로(점·쉼표·'ㅠㅠ'를 공백으로 읽은 SOFT_SIGNAL + 화상 말)
+  const reachesBackstop = (v: string) => passesBackstopPrefilter(v);
   // 분명한 출혈은 띄어쓰기와 무관하게 정규식 L3 — 백스톱(LLM)은 장애·시간 초과면 null이다
   for (const t of [
     // 그 자체로 출혈인 서술어 / 많이·계속 (운영과 같은 뜻)
@@ -1194,6 +1194,108 @@ console.log("\n[A-15] 붙여 쓴 위급 발화");
     everySpacing("백스톱 입구(10-22 저녁 가슴 조임·살려줄래)", t, (v) => detectEmergency(v).level >= 2 || reachesBackstop(v));
   for (const t of ["가슴 졸이며 기다렸어", "허리띠를 꽉 조였어", "가슴이 조마조마했어"])
     everySpacing("백스톱 비호출(10-22 저녁 조임 말)", t, (v) => !reachesBackstop(v));
+}
+
+// ── A-16: 화상 L3 안내 (2026-10-23) ─────────────────────────────────────────────────────
+//   백스톱 분류에 화상이 없어, 데인 어르신이 낙상·급성 L3면 "움직이지 마시고"(낙상)나 일반 급성 안내만 나갔다(FIXLOG 10-22 화상 OPEN).
+//   분류·라벨·백스톱 프롬프트·정규식 감지는 그대로 두고, 낙상·급성 L3에 지금 화상 말(mentionsCurrentBurn)이 있으면 기존 안내에 화상 줄을
+//   **덧붙인다**(같은 날 2차 — 1차는 안내를 통째로 바꿔 급성·낙상 안내가 덮였다). 불·연기·감전·얼굴/입 화상 + 숨이면 덧붙이지 않는다.
+//   (같은 날 3차) 급성도 넘어졌으면 젖은 수건, 급성 증상(숨·의식·가슴·뇌졸중)이 있으면 지금 급성 문구 그대로, 아이·약품은 문구를 고른다,
+//   백스톱이 피 말 없는 화상을 bleeding으로 고르면 급성과 같이. 사전필터는 지금 화상인지 보기 전의 일치(mentionsBurnWord)로 연다.
+//   (같은 날 4차) 덧붙이지 않는 조건을 한곳(needsBurnCare)에 모았다 — 피 말("피가 나"도)·급성 증상 말(규칙 밖도)·얼굴/입 부위 + 숨·목 쉼이면
+//   어느 분류든 지금 문구 그대로. 넘어진 말에 '걸을 수가 없어·안 움직여·부딪혔어·삐었어', 감탄 '아이 뜨거워'는 아이 말이 아니다, 약품은 털어 내기부터.
+//   (같은 날 5차) 식히기 줄(열 화상·아이·약품)은 어디서든 "움직이기 괜찮으시면 "으로 시작한다(급성·출혈→급성·넘어진 말 없는 낙상 — 낙상의
+//   '움직일 수 있으시면'도 같은 말로). 젖은 수건은 그대로. 붙여 쓴 피 말·어지럼 말·부사가 낀 불·흡입 징후는 덧붙이지 않고, '-질 못'·'-지 않'은
+//   넘어진 말, 관형 '아이 뜨거운'은 아이다. 검토 재현 묶음 전부는 시험 파일 (G).
+//   ⚠ A-15처럼 문장마다 공백을 모든 조합으로 뺀 꼴도 같은 판정이어야 한다. 배터리 전부는 __tests__/emergency-burn-reply.test.ts.
+console.log("\n[A-16] 화상 L3 안내");
+{
+  const spacings = (t: string): string[] => {
+    const w = t.split(" ");
+    const out: string[] = [];
+    for (let mask = 0; mask < 1 << (w.length - 1); mask++)
+      out.push(w.slice(1).reduce((s, x, i) => s + ((mask >> i) & 1 ? "" : " ") + x, w[0]));
+    return out;
+  };
+  const everySpacing = (label: string, t: string, ok: (v: string) => boolean) => {
+    const bad = spacings(t).filter((v) => !ok(v));
+    check(`${label}: ${t}`, bad.length === 0, bad.map((v) => `"${v}"`).join(" / "));
+  };
+  const family = "가족이나 보호자분께 지금 바로 연락해 주세요.";
+  const cool = "데인 곳은 흐르는 시원한 수돗물에 20분 넘게 식혀 주세요. 반지나 시계는 빼시고, 옷이 살에 붙었으면 억지로 떼지 마세요. 얼음은 대지 마시고 된장·치약도 바르지 마세요. 물집은 터뜨리지 마세요.";
+  const coolChild = "데인 곳은 흐르는 시원한 수돗물로 식혀 주시고, 아이 몸은 따뜻하게 감싸 주세요. 반지나 시계는 빼시고, 옷이 살에 붙었으면 억지로 떼지 마세요. 얼음은 대지 마시고 된장·치약도 바르지 마세요. 물집은 터뜨리지 마세요.";
+  const coolChem = "가루나 알갱이는 먼저 털어 내시고, 약품이 묻은 옷은 바로 벗으시고, 데인 곳은 흐르는 수돗물로 20분 넘게 계속 씻어 주세요. 눈에 들어갔으면 눈도 물로 계속 씻어 주세요.";
+  const towel = "데인 곳은 손이 닿으면 젖은 수건으로 식혀 주세요. 얼음은 대지 마시고 된장·치약도 바르지 마세요.";
+  const call119 = "할머니, 지금 바로 119에 전화해주세요. 손이 떨리시면 119라고 말씀만 하셔도 돼요.";
+  const acuteHead = `할머니! 지금 많이 안 좋으신 것 같아요. ${call119}`;
+  const acuteTail = `${family} 민지는 할머니 옆에서 계속 같이 있을게요. 119에 전화하시고 다시 민지 불러주세요.`;
+  const acuteReply = `${acuteHead} ${acuteTail}`;
+  const fallHead = "할머니! 다치셨다니 민지 너무 놀랐어요. 움직이지 마시고 119에 전화하셔서 도움을 받으세요.";
+  const fallReply = `${fallHead} ${family}`;
+  // 식히기 줄 앞의 조건(5차) — 젖은 수건 앞에는 없다
+  const moveOk = "움직이기 괜찮으시면 ";
+  const tap = (line: string) => `할머니, 지금 바로 119에 전화하세요. ${moveOk}${line} ${family}`;
+  const bleedReply = "할머니, 어디서 나는 피든 지금 바로 119에 전화하세요. 다친 곳이면 깨끗한 수건으로 꾹 누르고 계시고, 코피면 고개를 앞으로 숙이고 콧방울을 꼭 잡아 주세요. 가족이나 보호자분께 지금 바로 연락해 주세요.";
+  const fall = (v: string) => buildEmergencyL3Reply("할머니", "민지", "fall_injury", v);
+  const acute = (v: string) => buildEmergencyL3Reply("할머니", "민지", "medical_acute", v);
+  const bleed = (v: string) => buildEmergencyL3Reply("할머니", "민지", "bleeding", v);
+  // 화상 말 — 급성은 119 바로 뒤에 '움직이기 괜찮으시면' 식히기(나머지 글자는 그대로), 넘어진 말이 없는 낙상 분류도 '움직이기 괜찮으시면' 식히기,
+  //   피 말 없는 출혈 분류는 급성과 같이, 백스톱 사전필터를 연다
+  for (const t of ["뜨거운 물에 손을 데었어 너무 아파", "냄비 엎어서 다리에 화상 입었어", "국 끓이다가 손을 데여서 물집이 잡혔어", "끓는 물을 쏟아서 발이 너무 아파",
+    "기름이 튀어서 팔이 화끈거리고 너무 아파", "손 뎄어 어떡해", "덴 데가 너무 아파", "국 끓이다 냄비를 엎어서 다리가 데였는데 살갗이 벗겨졌어", "기름에 데인 것 같아",
+    "뜨거운 커피를 쏟았어", "손에 기름이 튀었어 너무 아파", "얼굴을 데었어 흉터 남으면 어떡해", "손을 데었는데 괜찮아?", "얼굴에 뜨거운 기름이 튀어서 눈을 못 뜨겠어",
+    // 4차 — 감탄 '아이 뜨거워'는 아이 말이 아니다 · '피부'는 피 말이 아니다 · 겉 살 '가슴에'는 급성 증상 말이 아니다
+    "아이 뜨거워 손을 데었어", "아이 참 손을 데었어 너무 아파", "기름에 데었는데 피부가 벗겨져서 너무 아파", "가슴에 뜨거운 국을 쏟아서 덴 것 같아",
+    // 5차 — 띄어 쓴 감탄 '아이 씨'도 아이 말이 아니다 · 판별 목록 밖(베임·찢어짐)은 조건 붙은 식히기(4차는 조건 없는 수돗물)
+    "아이 씨 손을 데었어 너무 아파", "칼에 베이고 뜨거운 물에도 데었어", "살이 찢어졌는데 뜨거운 물에도 데었어"])
+    everySpacing("화상 줄 덧붙임(급성 119 뒤·낙상 '움직이기 괜찮으시면'·출혈 급성) + 사전필터", t, (v) =>
+      acute(v) === `${acuteHead} ${moveOk}${cool} ${acuteTail}` && fall(v) === tap(cool) && bleed(v) === acute(v) && passesBackstopPrefilter(v));
+  // 아이 → 시간 없이 몸을 따뜻하게 · 약품 → 옷을 벗고 계속 씻기(아이 말이 같이 있어도 약품). 5차: 관형 '아이 뜨거운 …'·'아이 깜짝 놀라서'는 아이
+  for (const t of ["손주가 끓는 물을 뒤집어썼어 119 불러줘", "아기가 뜨거운 국을 엎어서 온몸에 화상을 입었어 살려줘", "우리 아이 뜨거운 물에 데었어", "아이 깜짝 놀라서 뜨거운 물을 쏟았어 다리를 데었어"])
+    everySpacing("화상 + 아이", t, (v) => acute(v) === `${acuteHead} ${moveOk}${coolChild} ${acuteTail}` && fall(v) === tap(coolChild));
+  for (const t of ["락스가 튀어서 팔을 데었어 살려줘", "세제가 튀어서 화상 입었어 살려줘", "손주가 락스를 쏟아서 손을 데었어 살려줘"])
+    everySpacing("화상 + 약품", t, (v) => acute(v) === `${acuteHead} ${moveOk}${coolChem} ${acuteTail}` && fall(v) === tap(coolChem));
+  // 넘어진 말 + 화상 말 — 낙상은 '움직이지 마시고'를 두고 젖은 수건, 급성(살려줘·119가 고른 꼴)도 젖은 수건(수돗물로 가라는 말은 없다)
+  for (const t of ["뜨거운 물 들고 가다 넘어져서 데었어 못 일어나겠어", "미끄러지면서 끓는 물을 쏟아서 다리가 너무 아파", "쓰러지면서 난로에 데었어",
+    "넘어져서 못 움직이겠어 손도 데었어 살려줘", "뜨거운 물에 데었는데 다리 풀려서 못 서겠어", "뜨거운 물을 쏟았는데 뼈가 부러진 것 같아", "손을 데었는데 꼼짝도 못 하겠어",
+    // 4차 — 서·걷·디디는 다른 꼴·안 움직·부딪힘·삠
+    "뜨거운 물에 데었는데 걸을 수가 없어", "발을 데었는데 못 걸어 살려줘", "뜨거운 물에 데었는데 다리가 안 움직여", "머리를 부딪혔는데 손도 데었어", "발목을 삐었는데 뜨거운 물에 데었어",
+    // 5차 — 준말 '-질 못'·긴 부정 '-지 않'·관용·접질림·넘어짐(4차는 '움직일 수 있으시면' 수돗물 — 살려줘면 조건 없이)
+    "뜨거운 물에 데었는데 일어나질 못하겠어 살려줘", "끓는 물을 쏟았는데 다리가 움직이지 않아", "다리가 말을 안 들어 뜨거운 물에 데었어 살려줘", "발목을 접질렸는데 끓는 물에 발도 데었어",
+    "계단에서 발을 헛디뎌서 뜨거운 물을 쏟았어"])
+    everySpacing("화상 + 넘어짐(움직이지 마시고 + 젖은 수건)", t, (v) =>
+      fall(v) === `${fallHead} ${towel} ${family}` && acute(v) === `${acuteHead} ${towel} ${acuteTail}` && !fall(v).includes("수돗물") && !acute(v).includes("수돗물"));
+  // 급성 증상(숨·의식·가슴·어지럼·뇌졸중) — 어느 분류든 지금 문구 그대로(4차: 급성 증상 말 — 규칙 밖의 "가슴이 아파"·"숨이 차"·"어지러워"도, 낙상·출혈 분류도)
+  for (const t of ["손을 데었는데 가슴이 너무 아파", "끓는 물에 데었는데 말이 어눌해", "화상을 입었는데 의식이 흐려져", "뜨거운 물을 뒤집어썼는데 숨이 안 쉬어져",
+    "손을 데었는데 가슴이 아파", "손을 데었는데 숨이 차", "뜨거운 물에 데었는데 어지러워", "손을 데었는데 머리가 핑 돌아 119 불러줘", "손을 데었는데 숨이 정말 너무 안 쉬어져",
+    "가슴이 답답하고 손이 덴 것 같아 너무 쓰라려",
+    // 5차 — 이 모듈의 L2 어지럼 규칙과 같은 결의 말·'숨 어려워'(4차는 수돗물 — 정규식 L2 '머리가 어질'은 백스톱 없이 결정적으로)
+    "뜨거운 물에 데었는데 머리가 어질어질해", "뜨거운 물에 데었는데 눈앞이 캄캄해", "손을 데었는데 현기증이 나", "손을 데었는데 세상이 빙빙 돌아",
+    "뜨거운 물에 데었는데 힘이 하나도 없어", "손을 데었는데 숨 어려워"])
+    everySpacing("화상 + 급성 증상(지금 문구 그대로)", t, (v) => acute(v) === acuteReply && fall(v) === fallReply && bleed(v) === bleedReply);
+  // 피 말(4차 — 피가 나·흘러도) — 어느 분류든 지금 문구 그대로(출혈 분류는 '꾹 누르고'가 남는다). 5차: 붙여 쓴 '피나·피흘러'·'다시피가'·'피에·피랑'도
+  for (const t of ["끓는 물에 데었는데 피가 나", "화상 입은 데서 피가 흘러", "기름에 데었는데 살갗이 벗겨지고 피가 나", "손을 데었는데 피가 철철 나 살려줘",
+    "손을 데었는데 피 나", "데인 데서 피 흘러", "데인 데서 다시 피가 나", "옷이 피에 젖었어 손도 데었어", "피랑 진물이 나 손을 데었어"])
+    everySpacing("화상 + 피 말(지금 문구 그대로)", t, (v) => acute(v) === acuteReply && fall(v) === fallReply && bleed(v) === bleedReply);
+  // 불·연기·감전·얼굴/입 부위 + 숨·목 쉼 — 화상 말이 있어도 지금 문구 그대로(먼저 안전한 곳·신선한 공기·호흡과 심장). 4차: 기도는 창 없이 부위 말만
+  for (const t of ["부엌에 불이 났어 손에 화상 입었어 살려줘", "연기를 많이 마셨어 얼굴도 데었어", "감전돼서 손에 화상 입었어 살려줘", "부엌에 불이 나서 손을 데었어 살려줘",
+    "연기가 많이 나서 숨이 안 쉬어져 손을 데었어", "가스가 폭발해서 얼굴을 데었어 살려줘", "얼굴에 화상 입었어 숨이 안 쉬어져", "뜨거운 국에 혀를 데었는데 호흡이 이상해",
+    "얼굴에 끓는 물이 튀어서 숨이 차", "덴 얼굴이 화끈거리고 숨이 차", "얼굴을 데었는데 목이 쉬었어", "화상 입은 입안이 부어서 목소리가 쉬었어",
+    // 5차 — 부사가 낀 불·폭발·불꽃·옷이 탐, 흡입 화상 징후(쉰 목소리·탄 코털·기침·막힘·부음·못 삼킴)(4차는 수돗물 — 살려줘면 조건 없이)
+    "기름에 불이 확 붙어서 손을 데었어 살려줘", "프라이팬에 불이 확 올라와서 손을 데었어", "압력밥솥이 터져서 손을 데었어", "콘센트에서 불꽃이 튀어서 손을 데었어", "난로에 옷이 타서 팔을 데었어",
+    "얼굴을 데었는데 쉰 목소리가 나", "얼굴을 데었는데 코털이 다 탔어", "뜨거운 김에 얼굴을 데었는데 기침이 계속 나", "뜨거운 국을 마시다 목구멍을 데었어 목이 막혀 살려줘",
+    "뜨거운 물을 마셔서 입안이 데였는데 침을 못 삼키겠어"])
+    everySpacing("불·연기·감전·기도(지금 문구 그대로)", t, (v) => acute(v) === acuteReply && fall(v) === fallReply && bleed(v) === bleedReply);
+  // 화상 통화·연결어미 '-는데/-ㄴ데'·데우다·부정·'데'+이다·당부·가슴 통증 비유·지난 화상 — 지금 화상 말이 아니다(지금 문구 그대로)
+  for (const t of ["손주랑 화상 통화하다가 넘어졌어", "요양원 화상 면회 끝나고 어지러워 쓰러질 것 같아", "화상으로 손주 얼굴 보다가 쓰러졌어", "넘어졌는데어떡해 못 일어나겠어",
+    "다리가 아픈데여 못 일어나겠어", "국을 데워 먹다가 넘어졌어", "화상은 아닌데 넘어져서 못 일어나", "뜨거운 물 쏟았는데 데지는 않았어 근데 넘어져서 허리가",
+    "거기가 미끄러운 데였는데 넘어져서 못 일어나겠어", "가슴이 불에 덴 것 같아 숨이 안 쉬어져", "어제 데인 데는 괜찮은데 지금 가슴이 너무 아파",
+    "어릴 때 데어서 흉터가 있는데 지금 입이 돌아갔어", "가슴이 아까부터 불에 덴 것 같아 숨이 안 쉬어져", "손주한테 뜨거운 거 쏟지 말라고 했어"])
+    everySpacing("지금 화상 말 아님(지금 문구 그대로)", t, (v) => !mentionsCurrentBurn(v) && fall(v) === fallReply && acute(v) === acuteReply);
+  // 발화 없음 · 화상 말 없음 · 피 말이 있는 출혈은 그대로
+  check("낙상 문구 불변(화상 말 없음)", fall("화장실에서 넘어져서 못 일어나겠어") === fallReply);
+  check("낙상·급성 문구 불변(발화 없음)", buildEmergencyL3Reply("할머니", "민지", "fall_injury") === fallReply && buildEmergencyL3Reply("할머니", "민지", "medical_acute") === acuteReply);
+  check("출혈 문구 불변(화상 말 + 피 말)", bleed("뜨거운 물에 데었는데 피가 안 멈춰") === bleedReply && bleed("넘어지면서 데었는데 피가 철철 나") === bleedReply);
 }
 
 console.log(`\n${pass}/${pass + fail} passed${fail ? `, ${fail} FAILED` : ""}`);

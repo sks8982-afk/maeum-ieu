@@ -867,7 +867,8 @@ async function handleEmergencyL3(params: {
 }): Promise<NextResponse> {
   const { result, userContent, conversationId, userId, honorific, companionName, transcription } = params;
   // 일반인 정신건강 점검의 위기 문항 양성 답이면 점검 흐름의 응답(위기 상담 안내 + 결과·돌봄)을 쓴다 — 아래 저장·알림은 동일
-  const reply = params.replyOverride ?? buildEmergencyL3Reply(honorific, companionName, result.category);
+  //   (2026-10-23) 발화는 userContent — 세 호출부 모두 evaluateEmergency에 넣은 글이다(transcription은 빈 음성 답이면 자리표시 글)
+  const reply = params.replyOverride ?? buildEmergencyL3Reply(honorific, companionName, result.category, userContent);
 
   /**
    * 저장 실패가 '119 안내'와 '보호자 알림'을 함께 삼키지 않게 분리한다(2026-10-01).
