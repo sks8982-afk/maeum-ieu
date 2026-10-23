@@ -101,6 +101,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://fonts.googleapis.com/css2?fami
 | **IMDSv2 강제** | 보호자 webhook에 blind SSRF 잔여 위험이 있다(DNS rebinding 미방어). IMDSv1이 열려 있으면 **인스턴스 자격증명 탈취로 승급**된다 |
 | ECS `stopTimeout` ≥ 60초 | `after()` 드레인 시간. SMTP 타임아웃 합(≈31초)보다 커야 응급 알림이 안 잘린다 |
 | Secrets Manager / SSM | 큰 JSON 3종(FCM·GCP·Play)은 Secrets Manager, 비밀 아닌 설정은 SSM Parameter Store |
+| **EventBridge Scheduler + API destination** (결제 예약 작업 `/api/cron/billing` — Vercel Cron 대체) | AWS에는 Vercel Cron이 없다 — 없으면 결제 대사·만료 처리·결제 3일 전 안내가 돌지 않는다. Scheduler는 API destination을 바로 부르지 못해 기본 이벤트 버스의 규칙을 거친다. 절차·재시도(5초 응답 제한)는 `docs/billing/웹결제_설정_가이드.md` 4단계 5번 |
 
 ### 1.4 env 준비
 
@@ -123,6 +124,7 @@ npm run check:env:deploy    # 실제 런타임 환경에서 실행 — 빌드 �
 - `OPS_ALERT_EMAIL` — 운영자 경보 받는 주소. **없으면 `GMAIL_USER` 자신에게 간다**(2026-10-06부터). 따로 받을 주소가 있을 때만 설정.
 - `TRUSTED_PROXY_HOPS` — ALB만이면 생략(기본 1). CloudFront+ALB면 `2`.
 - `DB_POOL_MAX` — (RDS max_connections − 여유 10) ÷ 최대 태스크 수.
+- 웹 결제 환경 변수 묶음은 `docs/billing/웹결제_설정_가이드.md` 4단계(비밀값은 Secrets Manager, 나머지는 SSM). 판매 스위치 `BILLING_PG_ENABLED`는 이전 뒤 시험 결제(가이드 5단계) 때 넣는다.
 
 ---
 
