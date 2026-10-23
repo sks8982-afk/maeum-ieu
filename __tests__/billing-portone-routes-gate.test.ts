@@ -12,7 +12,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
-  db, pg, mail, auth, apiReq, read, loginAs, setRole, rate, startSubscription, subRow, kst, APP_UA, CHROME_UA, BASE, CONSENT,
+  db, pg, mail, auth, apiReq, read, loginAs, setRole, rate, startSubscription, subRow, kst, APP_UA, CHROME_UA, BASE, CONSENT, runAfter,
 } from "./helpers/billing-portone-route-harness";
 
 const config = () => import("@/app/api/billing/portone/config/route");
@@ -119,6 +119,7 @@ describe("포트원 설정 전(키 없음) — 이미 있는 이용권 쪽 API�
     process.env.CRON_SECRET = "cron-secret-test-value";
     const c = await read(await (await cron()).GET(new Request(`${BASE}/api/cron/billing`, { headers: { authorization: "Bearer cron-secret-test-value" } })));
     expect(c.body).toEqual({ ok: true, skipped: "pg_not_configured" });
+    await runAfter(); // 뒤에 맡긴 일까지 돌려 본 뒤에 '아무것도 안 했다'를 본다
     expect(db.subscription.findMany).not.toHaveBeenCalled();
   });
 
@@ -152,6 +153,7 @@ describe("운영 중 API Secret이 빠지면(교체 실수·만료) — 포트�
     expect(st.body.pg).toMatchObject({ subscriptions: [expect.objectContaining({ status: "active" })] });
     const c = await read(await (await cron()).GET(new Request(`${BASE}/api/cron/billing`, { headers: { authorization: "Bearer cron-secret-test-value" } })));
     expect(c.body).toMatchObject({ ok: true });
+    await runAfter(); // 점검은 응답 뒤에 돈다(EventBridge 5초 제한)
     expect(mail.ops.map((o) => o.subject)).toContain("[결제] 포트원 API Secret 없음 — 결제 반영·해지 정리가 멈춰 있다");
   });
 });

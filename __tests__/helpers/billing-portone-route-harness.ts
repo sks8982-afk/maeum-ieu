@@ -25,6 +25,17 @@ export const auth = { session: null as null | { user: { id: string; screeningMod
 vi.mock("next-auth", () => ({ getServerSession: vi.fn(async () => auth.session) }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 
+/** next/server의 after — 맡긴 일을 모아 두었다가 시험이 runAfter()로 돌린다(진짜 after는 요청 스코프 밖에서 throw — push-device와 같은 방식) */
+export const afterTasks: (() => unknown)[] = [];
+vi.mock("next/server", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("next/server")>();
+  return { ...mod, after: (fn: () => unknown) => { afterTasks.push(fn); } };
+});
+/** 응답 뒤에 맡긴 일을 지금 돌린다(맡긴 순서대로) */
+export async function runAfter(): Promise<void> {
+  while (afterTasks.length) await afterTasks.shift()!();
+}
+
 export const rate = { ok: true, keys: [] as string[] };
 vi.mock("@/lib/rate-limit", () => ({
   checkRateLimit: vi.fn(async (key: string) => { rate.keys.push(key); return { ok: rate.ok, retryAfterSec: rate.ok ? 0 : 30 }; }),
@@ -59,6 +70,7 @@ beforeEach(() => {
   auth.session = null;
   rate.ok = true; rate.keys.length = 0;
   webhookEvents.length = 0;
+  afterTasks.length = 0;
   for (const k of EXTRA_ENV) delete process.env[k];
 });
 

@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFile, access } from "node:fs/promises";
 import {
-  db, pg, mail, apiReq, read, loginAs, setRole, startSubscription, subRow, kst, BASE,
+  db, pg, mail, apiReq, read, loginAs, setRole, startSubscription, subRow, kst, BASE, runAfter,
 } from "./helpers/billing-portone-route-harness";
 
 const cron = () => import("@/app/api/cron/billing/route");
@@ -41,18 +41,32 @@ describe("예약 작업 — CRON_SECRET Bearer", () => {
     "%s → 401, 아무것도 하지 않는다", async (_n, header) => {
       process.env.CRON_SECRET = "cron-secret-test-value";
       expect((await (await cron()).GET(cronReq(header))).status).toBe(401);
+      await runAfter(); // 뒤에 맡긴 일까지 돌려 본 뒤에 '아무것도 안 했다'를 본다
       expect(db.subscription.findMany).not.toHaveBeenCalled();
     });
 
-  it("맞는 값 → 대사 실행: 해지 기간이 끝난 이용권은 만료로", async () => {
+  it("맞는 값 → 202를 먼저 돌려주고 대사는 뒤에서(EventBridge 5초 제한) — 해지 기간이 끝난 이용권은 만료로(2026-10-23)", async () => {
     process.env.CRON_SECRET = "cron-secret-test-value";
     const s = await startSubscription({ seed: false });
     await (await cancelLib()).cancelAtPeriodEnd(s.subscriptionId, { purchaserUserId: "guardian-1" });
     vi.setSystemTime(kst("2026-12-02T11:00:00"));
     const r = await read(await (await cron()).GET(cronReq("Bearer cron-secret-test-value")));
-    expect(r.status).toBe(200);
-    expect(r.body).toMatchObject({ ok: true, failed: 0 });
+    // 🔒 응답은 일을 기다리지 않는다 — 기다리면 AWS EventBridge API destination이 5초 뒤 실패로 보고 경보를 울린다
+    expect(r.status).toBe(202);
+    expect(r.body).toEqual({ ok: true, accepted: true });
+    expect(subRow(s.subscriptionId).status).toBe("canceled");
+    await runAfter();
     expect(subRow(s.subscriptionId).status).toBe("expired");
+  });
+
+  it("뒤에서 통째로 실패하면(DB) — 부른 쪽은 이미 202를 받았으니 예전의 500 대신 운영 경보 메일(2026-10-23)", async () => {
+    process.env.CRON_SECRET = "cron-secret-test-value";
+    db.subscription.findMany.mockRejectedValueOnce(new Error("connection reset"));
+    const r = await read(await (await cron()).GET(cronReq("Bearer cron-secret-test-value")));
+    expect(r.status).toBe(202);
+    await runAfter();
+    // 🔒 이 경보가 없으면 AWS에서는 아무도 모른다 — EventBridge 실패 경보(FailedInvocations)는 202를 성공으로 센다
+    expect(mail.ops.map((o) => o.subject)).toContain("[결제] 예약 작업 실패 — 오늘 점검이 돌지 않았다");
   });
 });
 
