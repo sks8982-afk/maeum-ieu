@@ -74,5 +74,29 @@ export type Message = Prisma.MessageModel
  * 
  * ⚠️ 신규 테이블 생성은 prisma db push 금지(raw 테이블 drop 사고 이력)
  * — scripts/ops-create-subscription.ts + prisma generate.
+ * 
+ * 웹 PG 정기결제(포트원, 2026-10-22): 같은 표에 provider='portone' 행으로 둔다(혜택 판정 한 곳 — lib/billing/entitlement).
+ * 포트원 행은 purchaseToken = "portone:{issueId}", productId = 요금제 id(lib/billing/portone-plans).
+ * 추가 컬럼은 모두 nullable·기본값이라 기존 Play 행에는 영향이 없다 — scripts/ops-billing-pg.ts(추가만) + prisma generate.
+ * 결제 원장·동의 기록은 이 표가 아니라 BillingPayment·BillingConsent에 둔다(이 표는 User 삭제에 Cascade라 5년 보존을 못 한다).
  */
 export type Subscription = Prisma.SubscriptionModel
+/**
+ * Model BillingPayment
+ * 포트원 결제 원장 — 회차마다 본 결제·재시도·환불을 한 행씩(paymentId는 회차별로 정해진 값 — lib/billing/portone-period paymentIdFor).
+ * 
+ * ⚠ FK가 없다(id 문자열만): User·Subscription을 지워도 연쇄 삭제되지 않게 — 대금결제·계약·청약철회 기록 5년 보존
+ * (전자상거래법 시행령 제6조). 빌링키 원문은 두지 않고 지문(sha256 앞 32자)만 둔다.
+ * ⚠️ prisma db push 금지 — scripts/ops-billing-pg.ts + prisma generate.
+ */
+export type BillingPayment = Prisma.BillingPaymentModel
+/**
+ * Model BillingConsent
+ * 결제 동의 기록 — 항목·문구 버전·시각(분쟁 대비). FK 없음(계약 기록 5년 보존 — 시행령 제6조).
+ */
+export type BillingConsent = Prisma.BillingConsentModel
+/**
+ * Model BillingWebhookEvent
+ * 처리한 포트원 웹훅 — webhook-id(재전송해도 같은 값)로 중복 처리를 막는다.
+ */
+export type BillingWebhookEvent = Prisma.BillingWebhookEventModel

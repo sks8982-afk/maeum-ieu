@@ -3,6 +3,8 @@
  *
  * env: GMAIL_USER(보내는 Gmail 주소) + GMAIL_APP_PASSWORD(앱 비밀번호, 공백 자동 제거).
  *   미설정 시 graceful skip. 수신자는 보호자 이메일(동적).
+ *   결제 안내 등 서비스 메일은 **다른 계정**(SERVICE_GMAIL_USER + SERVICE_GMAIL_APP_PASSWORD)으로만 보낸다 — 위급 메일의 하루 발신
+ *   한도를 쓰지 않게(sendServiceEmail 주석, 2026-10-22).
  *   ⚠️ 앱 비밀번호는 절대 코드/깃에 두지 말 것 — env로만. 노출 시 Google 계정에서 재발급.
  */
 import nodemailer from "nodemailer";
@@ -150,6 +152,66 @@ export async function sendEmergencyEmail(to: string, p: EmergencyEmailPayload): 
 }
 
 /**
+ * 서비스 안내 메일(결제 안내 등)의 발신 계정 — **위급 메일 계정(GMAIL_USER)과 다른 Gmail 계정**(SERVICE_GMAIL_USER·SERVICE_GMAIL_APP_PASSWORD).
+ *
+ * 왜 따로인가(2026-10-22 검토): Gmail은 계정마다 하루 발신 한도가 있다(개인 약 500통). 결제 메일(결제 완료·3일 전 안내·환불…)이 같은
+ *   계정을 쓰면 결제 메일이 한도를 다 쓴 날 **보호자 위급 메일과 "모든 채널 실패" 운영 경보가 나가지 않는다** — 안전 기능은 결제와
+ *   무관해야 한다(설계 0). 그래서 같은 계정으로 설정하면 설정 안 됨으로 본다(serviceEmailProblem) — 위급 계정으로 대신 보내지도 않는다.
+ *   시간 제한은 위급 메일과 같다(멈춘 SMTP가 함수를 붙들지 않게).
+ */
+let serviceTransporter: { key: string; t: nodemailer.Transporter } | null = null;
+
+/** 서비스 메일 발신 계정이 바르게 설정됐나 — 문제(이름만, 값은 싣지 않는다)·없으면 null */
+export function serviceEmailProblem(): string | null {
+  const user = process.env.SERVICE_GMAIL_USER?.trim();
+  const pass = process.env.SERVICE_GMAIL_APP_PASSWORD?.replace(/\s/g, "");
+  if (!user || !pass) return "SERVICE_GMAIL_USER·SERVICE_GMAIL_APP_PASSWORD";
+  if (!EMAIL_RE.test(user)) return "SERVICE_GMAIL_USER(이메일 주소 형식)";
+  if (user.toLowerCase() === process.env.GMAIL_USER?.trim().toLowerCase()) return "SERVICE_GMAIL_USER(위급 메일 계정 GMAIL_USER와 달라야 함)";
+  return null;
+}
+
+export function isServiceEmailConfigured(): boolean {
+  return serviceEmailProblem() === null;
+}
+
+/** 서비스 메일 SMTP — 설정이 바뀌면(계정 교체) 새로 만든다. 설정이 틀리면 null(위급 계정으로 대신 보내지 않는다) */
+function getServiceTransporter(): { from: string; t: nodemailer.Transporter } | null {
+  if (serviceEmailProblem()) return null;
+  const user = process.env.SERVICE_GMAIL_USER!.trim();
+  const pass = process.env.SERVICE_GMAIL_APP_PASSWORD!.replace(/\s/g, "");
+  const key = `${user}\n${pass}`;
+  if (serviceTransporter?.key !== key) {
+    serviceTransporter = {
+      key,
+      t: nodemailer.createTransport({
+        host: "smtp.gmail.com", port: 465, secure: true, auth: { user, pass },
+        connectionTimeout: 8_000, greetingTimeout: 8_000, socketTimeout: 15_000, // 위급 메일과 같은 상한(getTransporter 주석)
+      }),
+    };
+  }
+  return { from: user, t: serviceTransporter.t };
+}
+
+/**
+ * 서비스 안내 메일(결제 안내 등, 2026-10-22) — 서비스 메일 전용 계정으로 보낸다(getServiceTransporter — 위급 메일 한도와 분리).
+ *   본문(subject·html·text)은 부르는 쪽이 만든다 — 사용자가 정한 값(이름)은 부르는 쪽이 이스케이프해야 한다.
+ *   결과는 위급 메일과 같은 분류(ok·transient·permanent). 실패 로그에는 받는 주소를 싣지 않는다(smtpLogFields).
+ */
+export async function sendServiceEmail(to: string, m: { subject: string; html: string; text: string }): Promise<EmailSendResult> {
+  const s = getServiceTransporter();
+  if (!s || !to || !EMAIL_RE.test(to)) return "permanent";
+  try {
+    await s.t.sendMail({ from: `마음이음 <${s.from}>`, to, subject: m.subject, html: m.html, text: m.text });
+    return "ok";
+  } catch (e) {
+    const kind = smtpFailureKind(typeof e === "object" && e !== null ? e : {});
+    console.warn(`[email] 안내 메일 발송 실패(${kind === "permanent" ? "영구" : "일시"}):`, smtpLogFields(e));
+    return kind;
+  }
+}
+
+/**
  * 운영자 경보 — **모든 보호자 채널이 실패했을 때**의 마지막 통보.
  *
  * 왜 필요한가 (2026-10-02 적대 리뷰): notifyGuardian이 sent:false를 돌려줘도 호출부 5곳이
@@ -188,12 +250,20 @@ const OPS_ALERT_RETRY_FLOOR_MS = 60 * 1000;
 /** subject → { 기록 시각, 막는 길이(보냄 1시간 · 보내는 중·실패 60초), 그 뒤 억제된 건수 } */
 const opsAlertSent = new Map<string, { at: number; windowMs: number; suppressed: number }>();
 
-export async function sendOpsAlert(subject: string, lines: string[]): Promise<boolean> {
-  // 받는 곳: OPS_ALERT_EMAIL → 없으면 **보내는 Gmail 계정 자신**(GMAIL_USER)의 받은편지함.
+/**
+ * opts.via "service"(2026-10-22): 결제 쪽 운영 경보는 서비스 메일 계정으로 보낸다 — 위급 메일 계정의 하루 한도를 쓰지 않게(결제 쪽은 구독마다
+ *   경보가 날 수 있다). 서비스 계정이 설정되지 않았으면 보내지 않는다(위급 계정으로 대신 보내지 않는다 — 부르는 쪽이 로그를 남긴다).
+ *   기본(위급·운영 경보)은 예전 그대로 위급 메일 계정이다.
+ */
+export async function sendOpsAlert(subject: string, lines: string[], opts: { via?: "service" } = {}): Promise<boolean> {
+  const service = opts.via === "service" ? getServiceTransporter() : null;
+  if (opts.via === "service" && !service) return false;
+  // 받는 곳: OPS_ALERT_EMAIL → 없으면 **보내는 Gmail 계정 자신**(GMAIL_USER, 결제 경보면 서비스 계정)의 받은편지함.
   //   2026-10-06: 운영 경보 전용 주소를 따로 두지 않는 운영이라, 예전처럼 "없으면 아무에게도 안 보냄"이면
   //   모든 보호자 채널이 실패한 응급을 아무도 모른다(사용자: "그 Gmail로 보내게 되어 있을 텐데").
-  const to = (process.env.OPS_ALERT_EMAIL?.trim() || process.env.GMAIL_USER?.trim());
-  const t = getTransporter();
+  const fromUser = service ? service.from : process.env.GMAIL_USER?.trim();
+  const to = (process.env.OPS_ALERT_EMAIL?.trim() || fromUser);
+  const t = service ? service.t : getTransporter();
   if (!t || !to || !EMAIL_RE.test(to)) return false;
 
   /**
@@ -230,7 +300,7 @@ export async function sendOpsAlert(subject: string, lines: string[]): Promise<bo
 
   try {
     await t.sendMail({
-      from: `마음이음 운영 <${process.env.GMAIL_USER}>`,
+      from: `마음이음 운영 <${fromUser}>`,
       to,
       subject: `[마음이음 운영] ${subject}`,
       text: body.join("\n"),

@@ -108,6 +108,7 @@ export async function POST(req: Request) {
 
   try {
     const sub = await getSubscription(token);
+    // 돌려받을 칸은 id만 — 웹 결제 컬럼이 아직 DB에 없어도(DDL보다 배포가 먼저) 없는 컬럼을 읽다 실패하지 않게(2026-10-22)
     await prisma.subscription.update({
       where: { purchaseToken: token },
       data: {
@@ -116,6 +117,7 @@ export async function POST(req: Request) {
         verifiedAt: new Date(),
         ...(sub.productId ? { productId: sub.productId } : {}),
       },
+      select: { id: true },
     });
     console.log(`[rtdn] 상태 갱신 token=${mask(token)} state=${sub.state} → ${mapState(sub.state, sub.autoRenewing)}`);
     return NextResponse.json({ ok: true });

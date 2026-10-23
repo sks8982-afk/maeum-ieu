@@ -94,6 +94,7 @@ describe("메시지를 읽는 곳 전수 — 관찰 기록을 뺄지 넣을지 �
     "lib/chat/prompt.ts": { exclude: 2, include: 0 },
     "lib/chat/summary-trigger.ts": { exclude: 1, include: 0 },
     "lib/usage/daily-limit.ts": { exclude: 1, include: 0 },
+    "lib/billing/paid-benefit.ts": { exclude: 1, include: 0, why: "유료 혜택 사용 판정 — 일일 한도와 같은 기준이라 감시 기록 제외" },
     "lib/chat/emergency-notify.ts": { exclude: 0, include: 1, why: "응급 dedup — 감시 중 응급도 같은 응급" },
     "lib/chat/messages.ts": { exclude: 0, include: 1, why: "L1 24h 누적 — 감시 조각의 L1도 같은 사람의 신호" },
     "lib/health/cognitive-alert.ts": { exclude: 0, include: 1, why: "알림 디바운스(notifiedAt) — 감시 조각엔 해당 없음" },

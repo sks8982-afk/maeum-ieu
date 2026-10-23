@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { ThemeToggle } from "../theme-toggle";
 import { LogoutButton } from "../LogoutButton";
 import { PushStatusBox } from "./PushStatusBox";
+import { SubscriptionManageLink } from "../components/SubscriptionManageLink";
 
 
 interface PatientRow {
@@ -102,6 +103,8 @@ export default function ExpertPage() {
             {viewerRole === "pro" && (
               <Link href="/expert/protocol" className="text-sm text-teal-600 hover:text-teal-800 dark:text-teal-300 dark:hover:text-teal-200">검진 문항지</Link>
             )}
+            {/* 웹 결제 이용권이 있는 보호자에게만, 브라우저에서만(SubscriptionManageLink 주석) */}
+            <SubscriptionManageLink className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200" />
             <Link href="/help" className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">사용 안내</Link>
             <Link href="/mypage" className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">마이페이지</Link>
             <LogoutButton />

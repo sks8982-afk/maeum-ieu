@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { PUSH_DEVICE_SCOPE, SUBSCRIPTION_SCOPE } from "@/lib/privacy-scopes";
+import {
+  PG_CONSENT_SCOPE, PG_PAYMENT_SCOPE, PG_SUBSCRIPTION_SCOPE, PUSH_DEVICE_SCOPE, SUBSCRIPTION_SCOPE,
+} from "@/lib/privacy-scopes";
 
 /**
  * 개인정보처리방침 (/privacy) — Google Play 등록 필수 URL.
@@ -14,11 +16,20 @@ import { PUSH_DEVICE_SCOPE, SUBSCRIPTION_SCOPE } from "@/lib/privacy-scopes";
  *   구독 기록(Play 구독 확인 결과 — SUBSCRIPTION_SCOPE)의 항목·이용 목적·보관 기준을 1·2·7항에 넣었다. 두 범위는 lib/privacy-scopes에서 가져온다
  *   (__tests__/account-deletion-page.test.ts가 세 문서를 맞대어 본다).
  *   ⚠ 시행일은 이 문안이 실제로 게시되는 배포일로 적는다 — 배포 전 날짜를 적으면 그날부터 시행된 것처럼 고지된다.
+ * 2026-10-22 개정(웹 결제 — 포트원 월 이용권): 구독 기록의 웹 결제 항목·결제 내역·결제 동의 기록(1항 — 범위는 lib/privacy-scopes의
+ *   PG_* 셋, 스키마·DDL 그대로), 이용 목적(2항), 결제대행 처리 위탁(5항), 결제·동의 기록 5년 보관 — 회원 탈퇴 뒤에도 분리 보관
+ *   (7항 — 전자상거래법 제6조·시행령 제6조, BillingPayment·BillingConsent에 FK가 없는 이유), 자동결제 키 암호화(8항),
+ *   그 기간에는 삭제 요청에도 보관한다는 안내(12항 — 개인정보 보호법 제36조① 단서).
+ *   ⚠ 수탁자 상호(코리아포트원·케이지이니시스·카카오페이·네이버파이낸셜)는 조사 기준의 예정 계약사다 — **실제 계약한 PG로 사용자가 확정**해
+ *     바꾼다(카드 PG가 바뀌면 그 회사로). 처리 위탁으로 볼지 제3자 제공으로 볼지는 법무 확인 대상이다(research uncertain 41).
+ *   ⚠ 시행일(UPDATED)은 이 개정을 실제로 배포하는 날로 맞춘다(위 원칙) — 바꾸면 __tests__/sensitive-consent-cards.test.ts의 날짜도 함께.
  */
 export const metadata = { title: "개인정보처리방침 · 마음이음" };
 
-const UPDATED = "2026년 10월 8일";
-const PREVIOUS = "2026년 10월 6일";
+const UPDATED = "2026년 10월 23일";
+/** 앞선 개정 — 변경 내역(15항)에 그 날짜로 남긴다 */
+const REVISED_OCT_8 = "2026년 10월 8일";
+const REVISED_OCT_6 = "2026년 10월 6일";
 /** 10월 6일 개정 전 방침 — 변경 내역의 맨 끝 줄 */
 const BEFORE_PREVIOUS = "2026년 9월 10일";
 const CONTACT = "jongwoo@firstcorea.com";
@@ -55,7 +66,8 @@ export default function PrivacyPage() {
             <li><b>보호자 정보</b>: 위급 상황 알림을 위한 보호자 이름·관계, 연락처(전화번호·이메일 — 암호화 저장), 알림을 받을 메신저 주소(선택)</li>
             <li><b>위치 정보(대략적)</b>: 대화 중 &lsquo;장소 지남력&rsquo; 참고 및 날씨 안내를 위한 도시 수준의 대략적 위치. 정밀(GPS) 위치는 사용하지 않으며, 기기 설정에서 언제든 철회할 수 있습니다.</li>
             <li><b>기기·이용 정보</b>: 앱 버전, 알림 토큰(푸시 알림용). 보호자·의사 계정으로 앱에 로그인하면 위급 알림을 그 휴대폰으로 보내고 한 휴대폰에는 지금 로그인한 계정의 알림만 가도록, 그 휴대폰의 등록 정보({PUSH_DEVICE_SCOPE})를 그 계정에 저장합니다. 어르신·일반 계정의 휴대폰 알림 토큰은 저장하지 않습니다.</li>
-            <li><b>구독 기록</b>: Google Play에서 구독을 결제하면 구독 혜택을 적용하려고 그 결제를 Google에 확인한 결과({SUBSCRIPTION_SCOPE})를 저장합니다. 결제 수단·결제 금액은 저장하지 않으며, 결제·환불 처리 기록은 Google Play에 남습니다.</li>
+            <li><b>구독 기록</b>: Google Play에서 구독을 결제하면 구독 혜택을 적용하려고 그 결제를 Google에 확인한 결과({SUBSCRIPTION_SCOPE})를 저장합니다. Google Play 구독은 결제 수단·결제 금액을 저장하지 않으며, 결제·환불 처리 기록은 Google Play에 남습니다.</li>
+            <li><b>웹 결제(월 이용권) 기록</b>: 웹 브라우저에서 월 이용권을 결제하면 구독 기록에 웹 결제 항목({PG_SUBSCRIPTION_SCOPE})을 더하고, 결제 내역({PG_PAYMENT_SCOPE})과 결제 동의 기록({PG_CONSENT_SCOPE})을 저장합니다. 카드 번호 등 결제수단 정보는 결제대행사의 결제창에 직접 입력되어 서비스는 받지도 저장하지도 않습니다. 카드로 결제할 때 결제 화면에 적는 이름·휴대전화 번호·이메일은 결제대행사의 결제창으로만 넘기고 서비스는 저장하지 않습니다.</li>
             <li><b>목소리 특징값(성문) — 민감정보(생체인식정보), 선택</b>: 목소리 등록에 따로 동의한 어르신만. 아래 3항 참고.</li>
             <li><b>상시 감시 정보 — 민감정보(건강정보), 선택</b>: 상시 감시에 따로 동의한 어르신만. 어르신 목소리로 판단된 말소리(저장하지 않음), 위급 신호로 판정된 말(글자)과 판정 결과. 아래 3항 참고.</li>
           </ul>
@@ -71,6 +83,7 @@ export default function PrivacyPage() {
             <li>(선택) 목소리 등록: 상시 감시 중 들린 말소리가 어르신 본인 목소리인지 확인(화자 확인)</li>
             <li>(선택) 상시 감시: 어르신이 혼자 계실 때 하시는 말에서 위급 신호를 찾아 보호자·의사에게 알림</li>
             <li>(유료 구독 시) 구독 혜택 적용·구독 상태 확인</li>
+            <li>(웹에서 월 이용권 결제 시) 결제·자동결제·해지·환불 처리, 결제 안내 메일 발송, 법령에 따른 거래 기록 보관</li>
           </ul>
         </Section>
 
@@ -112,11 +125,22 @@ export default function PrivacyPage() {
           <ul className="mt-2 list-disc space-y-1 pl-5">
             <li><b>Google LLC (Gemini API)</b>: 음성 인식, AI 대화 생성, 위급 신호 판단 보조, 상시 감시 말소리의 글자 변환</li>
             <li><b>Google LLC (Firebase Cloud Messaging)</b>: 보호자·의사 앱 위급 알림 발송</li>
-            <li><b>Google LLC (Gmail)</b>: 보호자 위급 알림 이메일 발송</li>
+            <li><b>Google LLC (Gmail)</b>: 보호자 위급 알림 이메일 발송, 웹 결제 안내 메일 발송</li>
             <li><b>Amazon Web Services</b>: 데이터베이스 저장(한국/서울 리전)</li>
             <li><b>Vercel Inc.</b>: 애플리케이션 호스팅(서버 실행 지역: 서울)</li>
             <li><b>Upstash, Inc.</b>: 과도한 요청 제한(이용자 식별값을 짧게 처리)</li>
           </ul>
+          <h3 id="payment-entrust" className="mt-3 scroll-mt-4 font-semibold text-zinc-900 dark:text-zinc-100">웹 결제(월 이용권) — 결제대행</h3>
+          <ul className="mt-1 list-disc space-y-1 pl-5">
+            <li><b>코리아포트원 주식회사(포트원)</b>: 결제 요청 중계, 자동결제 키(빌링키) 발급·결제 예약·결제·결제 취소(환불) 처리</li>
+            <li><b>주식회사 케이지이니시스</b>: 신용·체크카드 결제 처리(카드로 결제할 때)</li>
+            <li><b>주식회사 카카오페이</b>: 카카오페이 결제 처리(카카오페이로 결제할 때)</li>
+            <li><b>네이버파이낸셜 주식회사</b>: 네이버페이 결제 처리(네이버페이로 결제할 때)</li>
+          </ul>
+          <p className="mt-2 leading-relaxed">
+            결제대행사에는 결제에 필요한 정보(결제 금액·주문 이름·서비스 내부 회원 식별값, 카드 결제 때 결제 화면에 적은 이름·휴대전화 번호·이메일)만
+            전달합니다. 카드 번호 등 결제수단 정보는 결제대행사의 결제창에서 직접 입력되며 서비스는 받지 않습니다.
+          </p>
           <p className="mt-2 leading-relaxed">위 사업자는 각자의 개인정보 보호정책에 따라 데이터를 처리하며, 서비스는 목적 달성에 필요한 범위에서만 정보를 전달합니다.</p>
         </Section>
 
@@ -143,6 +167,12 @@ export default function PrivacyPage() {
             <li>상시 감시: 위급 신호가 없는 말은 저장하지 않으며, 위급 판정 기록은 상시 감시 동의 철회 또는 회원 탈퇴 시 삭제</li>
             <li>휴대폰 등록 정보({PUSH_DEVICE_SCOPE}): 보호자·의사 계정의 휴대폰만 저장합니다(어르신·일반 계정은 저장하지 않습니다). 앱에서 로그아웃하거나 보호자 화면에서 휴대폰을 삭제하면 지웁니다. 같은 휴대폰에서 다른 계정으로 로그인하면 이전 토큰은 폐기하고, 새 계정이 보호자·의사 계정이면 새로 등록합니다. 연결 문제로 바로 지우지 못한 토큰은 그 휴대폰이 다시 로그인해 등록하거나 알림 발송 때 무효로 확인되는 대로 지우고, 앱 삭제·재설치 등으로 더 이상 쓸 수 없게 된 토큰은 알림을 보낼 때 확인되는 대로 삭제하며, 회원 탈퇴 시 계정과 함께 삭제합니다.</li>
             <li>구독 기록({SUBSCRIPTION_SCOPE}): 구독이 끝나거나 해지돼도 보관하며, 결제한 계정과 혜택을 받는 계정 중 어느 쪽이든 회원 탈퇴하면 그 구독 기록을 함께 삭제합니다.</li>
+            <li>구독 기록의 웹 결제 항목({PG_SUBSCRIPTION_SCOPE}): 위 구독 기록과 같습니다(회원 탈퇴 시 함께 삭제). 해지·만료되면 자동결제 키는 결제대행사에서 지우고 서비스에서도 지웁니다.</li>
+            <li id="payment-retention" className="scroll-mt-4">
+              웹 결제 내역({PG_PAYMENT_SCOPE})과 결제 동의 기록({PG_CONSENT_SCOPE}): 「전자상거래 등에서의 소비자보호에 관한 법률」 제6조와
+              같은 법 시행령 제6조에 따라 대금결제·계약·청약철회 기록으로 <b>5년</b> 보관합니다. 회원 탈퇴 뒤에도 이 기간에는 다른 정보와
+              분리해 보관하고, 기간이 지나면 파기합니다. 결제에 관한 불만·분쟁 처리 기록(문의 메일 등)은 3년 보관합니다.
+            </li>
           </ul>
           <p className="mt-2 leading-relaxed">
             파기는 데이터베이스에서 복구할 수 없게 삭제하는 방법으로 합니다. 회원 탈퇴(계정 삭제)는 요청 후 본인
@@ -155,6 +185,7 @@ export default function PrivacyPage() {
             <li>모든 통신은 HTTPS(TLS)로 암호화됩니다.</li>
             <li>보호자 연락처(전화번호·이메일)는 AES 방식으로 암호화하여 저장합니다.</li>
             <li>목소리 특징값(성문)은 AES-256-GCM으로 암호화하여 저장합니다.</li>
+            <li>웹 결제의 자동결제 키(빌링키)는 AES-256-GCM으로 암호화하여 저장하고, 결제 내역에는 그 키의 지문만 남깁니다.</li>
             <li>비밀번호는 복호화 불가능한 해시(bcrypt)로 저장됩니다.</li>
             <li>데이터베이스 접근은 최소 권한 원칙에 따라 통제됩니다.</li>
           </ul>
@@ -198,6 +229,7 @@ export default function PrivacyPage() {
             <li>목소리 등록 확인·삭제·동의 철회: 마이페이지 &gt; 목소리 등록 화면(아래 [목소리 등록 동의 철회])</li>
             <li>상시 감시 동의 철회: 상시 감시 화면 아래 [상시 감시 동의 철회] — 보관한 상시 감시 기록이 함께 삭제됩니다.</li>
             <li>회원 탈퇴: <Link href="/account-deletion" className="text-[#007bff] hover:underline">계정 삭제 안내</Link></li>
+            <li>웹 결제 내역·결제 동의 기록은 법령이 정한 보관 기간(7항) 동안에는 삭제를 요청하셔도 보관합니다(개인정보 보호법 제36조제1항 단서).</li>
           </ul>
         </Section>
 
@@ -220,11 +252,16 @@ export default function PrivacyPage() {
         <Section title="15. 변경 내역">
           <ul className="list-disc space-y-1 pl-5">
             <li>
-              <b>{UPDATED} 시행</b>: 보호자·의사 계정 휴대폰 등록 정보({PUSH_DEVICE_SCOPE}) 저장(1항)과 보관·삭제 기준(7항),
+              <b>{UPDATED} 시행</b>: 웹 결제(월 이용권) — 구독 기록의 웹 결제 항목·결제 내역·결제 동의 기록(1항), 이용 목적(2항),
+              결제대행 처리 위탁(5항 — 코리아포트원·케이지이니시스·카카오페이·네이버파이낸셜), 결제·동의 기록 5년 보관과 탈퇴 뒤 분리 보관(7항),
+              자동결제 키 암호화 저장(8항), 법정 보관 기록의 삭제 요청 안내(12항)
+            </li>
+            <li>
+              <b>{REVISED_OCT_8} 시행</b>: 보호자·의사 계정 휴대폰 등록 정보({PUSH_DEVICE_SCOPE}) 저장(1항)과 보관·삭제 기준(7항),
               구독 기록({SUBSCRIPTION_SCOPE}) 항목(1항)·이용 목적(2항)과 보관·삭제 기준(7항), 연결된 어르신 화면에 표시되는 알림 수신 가능 여부(9항)
             </li>
             <li>
-              <b>{PREVIOUS} 시행</b>: 목소리 등록(성문)·상시 감시 항목과 별도 동의 신설(1·2·3항), 제3자 제공(4항)·국외 이전(6항)·
+              <b>{REVISED_OCT_6} 시행</b>: 목소리 등록(성문)·상시 감시 항목과 별도 동의 신설(1·2·3항), 제3자 제공(4항)·국외 이전(6항)·
               위급 신호 자동 판단(11항) 안내 신설, 처리 위탁 사업자 추가(Firebase Cloud Messaging·Gmail·Upstash),
               항목별 보관 기간 명시(7항), 목소리 특징값 암호화 저장(8항), 보호자 정보 표기 정정(이름·관계는 암호화 대상 아님),
               권리 행사 방법 보완(12항), 생성형 인공지능 이용 안내

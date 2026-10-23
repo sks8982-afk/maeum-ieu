@@ -7,6 +7,7 @@ import { normalizeMode } from "@/lib/roles";
 import { flagOn } from "@/lib/flags";
 import { LogoutButton } from "./LogoutButton";
 import { BrandLogo, CompanyLogo, TalkBadge } from "./BrandLogo";
+import { BizInfoFooter } from "./components/BizInfoFooter";
 
 export default async function Home() {
   const session = await getServerSession(authOptions);
@@ -30,6 +31,8 @@ export default async function Home() {
           </div>
           <div className="mt-12"><CompanyLogo /></div>
         </main>
+        {/* 첫 화면의 사업자 정보·공정위 사업자정보 확인 링크(시행규칙 제7조② — 2026-10-22, BIZ_* env가 있을 때만 보인다) */}
+        <BizInfoFooter />
       </div>
     );
   }

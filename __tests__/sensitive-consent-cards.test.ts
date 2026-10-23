@@ -152,29 +152,47 @@ describe("개인정보처리방침 — 2026-10-06 개정분", () => {
     expect(line).not.toContain("로그인한 계정에 저장합니다");
   });
 
-  it("시행일·변경 내역(15항) — 10월 8일(배포일) 시행, 바뀐 것을 빠짐없이 적고 10월 6일 개정분은 그 날짜로 남긴다", () => {
+  it("카드 구매자 정보(이름·휴대전화·이메일)는 마음이음 결제 화면에서 적는다고 쓴다(결제창이라 쓰지 않는다) — 결제창으로만 넘기고 저장하지 않는다", () => {
+    const items = privacy.slice(privacy.indexOf("1. 수집하는 개인정보 항목"), privacy.indexOf("2. 개인정보의 이용 목적"));
+    expect(items).toContain("카드로 결제할 때 결제 화면에 적는 이름·휴대전화 번호·이메일은 결제대행사의 결제창으로만 넘기고 서비스는 저장하지 않습니다");
+    expect(privacy).not.toContain("결제창에 적");
+  });
+
+  it("시행일·변경 내역(15항) — 10월 23일(배포일) 시행, 바뀐 것을 빠짐없이 적고 10월 8일·6일 개정분은 그 날짜로 남긴다", () => {
     // 🔒 시행일은 게시(배포)일이다 — 10-07에 쓴 문안이 10-08에 배포되는데 "10월 7일 시행"이라 적으면 게시 전부터 시행된 것처럼 고지된다
-    expect(privacy).toContain("시행 2026년 10월 8일");
+    //   (2026-10-22 웹 결제 개정) ⚠ 이 개정을 다른 날 배포하면 방침의 UPDATED와 이 날짜를 함께 그날로 바꾼다
+    expect(privacy).toContain("시행 2026년 10월 23일");
     expect(privacy).not.toContain("10월 7일");
     const sec = privacy.slice(privacy.indexOf("15. 변경 내역"));
     const items = [...sec.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((m) => m[1].replace(/\s+/g, " "));
-    expect(items).toHaveLength(3);
-    // 🔒 고지 문안(확정) — 바뀐 것을 빠짐없이
-    expect(items[0]).toMatch(/^<b>2026년 10월 8일 시행<\/b>: /);
+    expect(items).toHaveLength(4);
+    // 🔒 고지 문안 — 바뀐 것을 빠짐없이(웹 결제: 1·2·5·7·8·12항)
+    expect(items[0]).toMatch(/^<b>2026년 10월 23일 시행<\/b>: 웹 결제\(월 이용권\) — /);
+    for (const k of [
+      "구독 기록의 웹 결제 항목·결제 내역·결제 동의 기록(1항)", "이용 목적(2항)", "결제대행 처리 위탁(5항",
+      "결제·동의 기록 5년 보관과 탈퇴 뒤 분리 보관(7항)", "자동결제 키 암호화 저장(8항)", "법정 보관 기록의 삭제 요청 안내(12항)",
+    ]) {
+      expect(items[0], k).toContain(k);
+    }
+    // 🔒 변경 내역이 적은 항에 그 내용이 실제로 있어야 한다
+    const purposes = privacy.slice(privacy.indexOf("2. 개인정보의 이용 목적"), privacy.indexOf("3. 목소리 등록"));
+    expect(purposes).toContain("<li>(웹에서 월 이용권 결제 시) 결제·자동결제·해지·환불 처리, 결제 안내 메일 발송, 법령에 따른 거래 기록 보관</li>");
+    expect(privacy.slice(privacy.indexOf("8. 보호 조치"), privacy.indexOf("9. 결과 열람 범위"))).toContain("자동결제 키(빌링키)는 AES-256-GCM으로 암호화");
+    expect(privacy.slice(privacy.indexOf("12. 이용자의 권리"), privacy.indexOf("13. 아동"))).toContain("보관 기간(7항) 동안에는 삭제를 요청하셔도 보관합니다");
+    expect(items[1]).toMatch(/^<b>2026년 10월 8일 시행<\/b>: /);
     for (const k of [
       "보호자·의사 계정 휴대폰 등록 정보(알림 토큰·앱 버전·알림 허용·위급 알림 채널 상태·마지막 확인 시각) 저장(1항)과 보관·삭제 기준(7항)",
       // (12차) 1·2·7항에 새로 넣은 구독 기록(항목·이용 목적·보관 기준)도 같은 시행분으로 적는다
       "구독 기록(상품·구독 상태·만료일·구매 토큰·마지막 확인 시각·환불·강제 해지 시각, 결제한 계정과 혜택을 받는 계정) 항목(1항)·이용 목적(2항)과 보관·삭제 기준(7항)",
       "연결된 어르신 화면에 표시되는 알림 수신 가능 여부(9항)",
     ]) {
-      expect(items[0], k).toContain(k);
+      expect(items[1], k).toContain(k);
     }
     // 🔒 변경 내역이 2항을 적으면 2항에 그 목적이 실제로 있어야 한다(구독 기록을 저장하는 까닭 — 1항 "구독 혜택을 적용하려고")
-    const purposes = privacy.slice(privacy.indexOf("2. 개인정보의 이용 목적"), privacy.indexOf("3. 목소리 등록"));
     expect(purposes).toContain("<li>(유료 구독 시) 구독 혜택 적용·구독 상태 확인</li>");
-    // 🔒 10월 6일 개정분이 새 날짜로 둔갑하면 언제 무엇이 바뀌었는지 고지가 틀린다
-    expect(items[1]).toMatch(/^<b>2026년 10월 6일 시행<\/b>: 목소리 등록\(성문\)·상시 감시 항목과 별도 동의 신설/);
-    expect(items[2]).toBe("이전 방침: 2026년 9월 10일 시행");
+    // 🔒 10월 8일·6일 개정분이 새 날짜로 둔갑하면 언제 무엇이 바뀌었는지 고지가 틀린다
+    expect(items[2]).toMatch(/^<b>2026년 10월 6일 시행<\/b>: 목소리 등록\(성문\)·상시 감시 항목과 별도 동의 신설/);
+    expect(items[3]).toBe("이전 방침: 2026년 9월 10일 시행");
   });
 
   it("연결된 어르신 화면에 보이는 보호자·의사 휴대폰 정보는 '받을 수 있는 상태'뿐 — 열람 범위(9항)에 적는다(2026-10-07 4차)", () => {

@@ -156,21 +156,52 @@ model Message {
 ///
 /// ⚠️ 신규 테이블 생성은 prisma db push 금지(raw 테이블 drop 사고 이력)
 ///    — scripts/ops-create-subscription.ts + prisma generate.
+///
+/// 웹 PG 정기결제(포트원, 2026-10-22): 같은 표에 provider='portone' 행으로 둔다(혜택 판정 한 곳 — lib/billing/entitlement).
+///   포트원 행은 purchaseToken = "portone:{issueId}", productId = 요금제 id(lib/billing/portone-plans).
+///   추가 컬럼은 모두 nullable·기본값이라 기존 Play 행에는 영향이 없다 — scripts/ops-billing-pg.ts(추가만) + prisma generate.
+///   결제 원장·동의 기록은 이 표가 아니라 BillingPayment·BillingConsent에 둔다(이 표는 User 삭제에 Cascade라 5년 보존을 못 한다).
 model Subscription {
   id                 String    @id @default(cuid())
   purchaserUserId    String
   beneficiaryUserId  String
-  productId          String // Play 구독 상품 ID
-  purchaseToken      String    @unique // Play 구매 토큰 — 검증·RTDN 조회 키
+  productId          String // Play 구독 상품 ID · 포트원은 요금제 id
+  purchaseToken      String    @unique // Play 구매 토큰 — 검증·RTDN 조회 키 · 포트원은 "portone:" + issueId
   /// active | grace | on_hold | paused | canceled | expired | revoked
   /// canceled = 해지 예약(만료일까지는 혜택 유지), expired/revoked = 혜택 종료
+  /// 포트원 행은 pending(빌링키 발급 대기) → activating(첫 결제 중) → active, 첫 결제 실패는 failed — 셋 다 혜택 없음
   status             String    @default("active")
   /// 혜택 만료 시각(Play expiryTime). 이 시각 전까지만 유료 티어.
+  /// 포트원은 이번 이용기간 끝(= 다음 결제 시각), 결제 실패 재시도 중(grace)에는 재시도 시각 + 하루
   expiresAt          DateTime?
   /// 마지막으로 Google에 검증한 시각 — 오래된 상태를 신뢰하지 않기 위한 기준
   verifiedAt         DateTime  @default(now())
   /// 환불·강제 해지 시각(null=유효)
   revokedAt          DateTime?
+  /// 결제 경로 — play(기존 행 기본값) | portone(웹 PG 정기결제). 아래 컬럼은 portone 행에서만 쓴다
+  provider           String    @default("play")
+  payMethod          String? // CARD | KAKAOPAY | NAVERPAY
+  /// 가입 당시 월 금액(부가세 포함) — 갱신 결제는 이 금액으로만(요금 인상은 30일 전 별도 동의 — 전자상거래법 제13조⑥)
+  priceKrw           Int?
+  /// 가입 당시 요금제의 하루 대화 상한 — 요금제 설정이 바뀌거나 깨져도 이미 낸 돈만큼의 혜택은 그대로
+  dailyTurnLimit     Int?
+  /// 빌링키 AES 암호문(lib/crypto encryptPII) — 해지·만료 때 포트원에서 지운 뒤 null
+  billingKeyEnc      String?
+  anchorDay          Int? // 매월 결제 기준일(KST 1~31, 그날이 없는 달은 말일)
+  cycleNo            Int       @default(0) // 결제가 끝난 회차 수
+  nextChargeAt       DateTime? // 다음 결제(갱신·재시도) 예정 시각 — 더 결제하지 않으면 null
+  /// 포트원 결제 예약 id — "이미 예약돼 있다"는 응답만 받았으면 그 예약의 결제 id(예약 취소는 빌링키 단위라 id는 '예약 있음' 표시로만 쓴다)
+  nextScheduleId     String?
+  cancelAtPeriodEnd  Boolean   @default(false)
+  failedChargeCount  Int       @default(0)
+  canceledAt         DateTime?
+  /// normal | immediate | withdrawal | payment_failed | link_gone | key_deleted | refunded | purchaser_deleted | beneficiary_deleted
+  ///   | revoked_external(포트원에서 예약이 취소됨) | test_mode_ended(시험 결제 정리)
+  ///   · 결제 시작을 막은 시도(failed)는 expired | duplicate | config | not_linked
+  cancelType         String?
+  renewalNoticeFor   DateTime? // 결제 3일 전 안내를 보낸 결제 예정 시각(같은 회차에 두 번 보내지 않게)
+  /// 가입 당시 무료 하루 대화 한도(DAILY_TURN_LIMIT) — '유료 혜택 사용' 판정이 나중에 바뀐 무료 한도로 거꾸로 달라지지 않게(lib/billing/portone-cancel)
+  freeTurnLimit      Int?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
@@ -180,6 +211,69 @@ model Subscription {
   /// 혜택 판정은 매 턴 (beneficiaryUserId, status, expiresAt)로 돈다
   @@index([beneficiaryUserId, status])
   @@index([purchaserUserId])
+  /// 예약 작업(대사·만료·3일 전 안내)이 포트원 행을 결제 예정 시각으로 찾는다
+  @@index([provider, status, nextChargeAt])
+}
+
+/// 포트원 결제 원장 — 회차마다 본 결제·재시도·환불을 한 행씩(paymentId는 회차별로 정해진 값 — lib/billing/portone-period paymentIdFor).
+///
+/// ⚠ FK가 없다(id 문자열만): User·Subscription을 지워도 연쇄 삭제되지 않게 — 대금결제·계약·청약철회 기록 5년 보존
+///   (전자상거래법 시행령 제6조). 빌링키 원문은 두지 않고 지문(sha256 앞 32자)만 둔다.
+/// ⚠️ prisma db push 금지 — scripts/ops-billing-pg.ts + prisma generate.
+model BillingPayment {
+  paymentId       String    @id
+  subscriptionId  String
+  purchaserUserId String
+  cycleNo         Int
+  kind            String // first | renewal | retry
+  attempt         Int       @default(0) // 0 = 본 결제, 1·2 = 재시도
+  amountKrw       Int
+  payMethod       String?
+  billingKeyHash  String // 결제에 쓴 빌링키의 지문 — 포트원 조회 결과와 대조한다
+  /// requested | scheduled | paid | failed | cancelled | partial_cancelled | revoked(예약 취소)
+  status          String
+  periodStart     DateTime? // 이 회차 이용기간 시작(갱신은 예정 시각, 첫 결제는 결제 시각)
+  periodEnd       DateTime? // 이 회차 이용기간 끝(= 다음 결제 시각) — 결제 완료 때 채운다
+  scheduledAt     DateTime? // 예약 결제 시각(즉시 결제는 null)
+  paidAt          DateTime?
+  cancelledKrw    Int       @default(0)
+  /// 지금 해지·청약철회 뒤 이 결제의 누적 취소액이 되어야 할 값 — 신청 시점에 고정(다시 시도해도 같은 목표 → 이중 환불 없음)
+  refundTargetKrw Int?
+  failureReason   String?
+  receiptUrl      String?
+  /// 결제 완료 안내 메일을 보낸 시각 — 못 보냈으면 null(예약 작업이 다시 보낸다 — 자동결제마다 알려야 한다, 전자상거래법 제8조③)
+  paidMailAt      DateTime?
+  /// 이 결제의 계약을 끝낸 해지·청약철회 — 종류(normal·immediate·withdrawal·link_gone…)와 신청 시각. 구독 기록은 계정과 함께 지워져도
+  ///   이 원장은 남는다(계약·청약철회 기록 5년 — 시행령 제6조). unwanted = 해지 뒤 실행돼 전액 취소한 결제(그 시각에 취소를 요청)
+  cancelType      String?
+  cancelRequestedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([subscriptionId, cycleNo])
+  @@index([purchaserUserId, createdAt])
+}
+
+/// 결제 동의 기록 — 항목·문구 버전·시각(분쟁 대비). FK 없음(계약 기록 5년 보존 — 시행령 제6조).
+model BillingConsent {
+  id             String   @id @default(cuid())
+  userId         String
+  subscriptionId String?
+  termsVersion   String
+  items          Json // 동의 항목 이름 배열
+  /// 동의할 때 화면에 안내한 조건 — 요금제 id·월 금액·하루 대화 한도·무료 한도·결제수단·혜택 받는 분(계약 내용 기록 — 구독 기록이 지워져도 남는다)
+  offer          Json?
+  createdAt      DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([subscriptionId])
+}
+
+/// 처리한 포트원 웹훅 — webhook-id(재전송해도 같은 값)로 중복 처리를 막는다.
+model BillingWebhookEvent {
+  webhookId  String   @id
+  type       String
+  receivedAt DateTime @default(now())
 }
 
 // 참고: cognitive_assessments 테이블은 Prisma 외부 (raw SQL)로 관리
