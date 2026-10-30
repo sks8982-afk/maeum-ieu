@@ -132,7 +132,9 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://fonts.googleapis.com/css2?fami
   `ENCRYPTION_KEY`(Vercel 운영과 같은 값 — 10-30 사용자 확인), `FCM_SERVICE_ACCOUNT_B64`, `UPSTASH_REDIS_REST_URL`·`_TOKEN`,
   `GMAIL_USER`·`GMAIL_APP_PASSWORD`, `GCP_PROJECT_ID`, `GOOGLE_APPLICATION_CREDENTIALS_B64`. 로컬 `.env`에서 값을 출력하지 않고 바로 옮겼다.
 - **빌드 인자**: `NEXT_PUBLIC_SHOW_LIVE_BETA=1`(Vercel 운영과 같게 — 운영 `/help`가 `live?start=1`), `NEXT_PUBLIC_APP_ON_PLAY`는 넣지 않음.
-- ⏳ **전환 전에 대조**: Vercel에만 있을 수 있는 값 — `ADMIN_EMAILS`(관리자 화면), `OPS_ALERT_EMAIL`, 모델·한도
+- ✅ `ADMIN_EMAILS`(관리자 화면) — 10-30 작업 정의 environment에 넣음. 관리자 계정으로 AWS·Vercel 모두 로그인 → `/api/admin/overview` 200 확인
+  (Vercel 값은 '숨김(Secret)'이라 읽을 수 없었고, 같은 계정이 양쪽에서 열리는 것으로 일치를 확인. 계정 주소는 공개 저장소에 적지 않는다).
+- ⏳ **전환 전에 대조**: Vercel에만 있을 수 있는 나머지 값 — `OPS_ALERT_EMAIL`, 모델·한도
   (`COMPANION_MODEL`·`COGNITIVE_MODEL`·`DAILY_TURN_LIMIT` 등), `C2_NOTIFY`, `PROMPT_CACHE`, Play RTDN을 쓰면 `PLAY_*`·`BILLING_RTDN_SECRET`.
   Vercel 프로젝트가 이 PC에 로그인된 Vercel 계정 소속이 아니어서 목록을 읽지 못했다 — Vercel 환경 변수 **이름 목록**을 받아 맞춘다.
 
