@@ -47,9 +47,9 @@ export default function MentalPage() {
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <header className="border-b border-zinc-200 bg-white px-6 py-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="mx-auto flex max-w-3xl items-center justify-between">
+        <div className="mx-auto flex max-w-3xl items-center justify-between flex-wrap gap-x-3 gap-y-2 whitespace-nowrap">
           <h1 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">🧠 마음 건강</h1>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <ThemeToggle />
             <Link href="/chat" className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">대화</Link>
             <Link href="/help" className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">사용 안내</Link>

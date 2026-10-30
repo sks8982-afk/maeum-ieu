@@ -191,9 +191,9 @@ export default function PatientDetailPage() {
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <header className="border-b border-zinc-200 bg-white px-6 py-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="mx-auto flex max-w-4xl items-center justify-between">
+        <div className="mx-auto flex max-w-4xl items-center justify-between flex-wrap gap-x-3 gap-y-2 whitespace-nowrap">
           <h1 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">{data?.viewerRole === "guardian" ? "👨‍👩‍👧 상태 요약" : "🩺 환자 리포트"}</h1>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             {params?.id && data?.viewerRole !== "guardian" && (
               <Link href={`/chat?patient=${params.id}`} className="rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-teal-700">
                 🩺 검사 시작

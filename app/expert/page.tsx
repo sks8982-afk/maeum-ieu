@@ -96,9 +96,9 @@ export default function ExpertPage() {
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <header className="border-b border-zinc-200 bg-white px-6 py-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="mx-auto flex max-w-4xl items-center justify-between">
+        <div className="mx-auto flex max-w-4xl items-center justify-between flex-wrap gap-x-3 gap-y-2 whitespace-nowrap">
           <h1 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">{viewerRole === "guardian" ? "👨‍👩‍👧 가족 상태" : "🩺 환자 관리"}</h1>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <ThemeToggle />
             {viewerRole === "pro" && (
               <Link href="/expert/protocol" className="text-sm text-teal-600 hover:text-teal-800 dark:text-teal-300 dark:hover:text-teal-200">검진 문항지</Link>
@@ -154,7 +154,7 @@ export default function ExpertPage() {
             {loading && <p className="text-sm text-zinc-500">불러오는 중…</p>}
             {!loading && patients.length === 0 && (
               <p className="rounded-xl border border-dashed border-zinc-300 px-4 py-8 text-center text-sm text-zinc-500 dark:border-zinc-700">
-                아직 연결된 {viewerRole === "guardian" ? "어르신" : "환자"}이 없습니다. 위 초대 코드를 {viewerRole === "guardian" ? "어르신께" : "환자에게"} 전달해 주세요.
+                아직 연결된 {viewerRole === "guardian" ? "어르신이" : "환자가"} 없습니다. 위 초대 코드를 {viewerRole === "guardian" ? "어르신께" : "환자에게"} 전달해 주세요.
               </p>
             )}
             <div className="grid gap-3">
