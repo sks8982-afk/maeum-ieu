@@ -65,6 +65,39 @@ describe("pgTlsOptions — RDS도 로컬도 아니면 자체 CA로 검증", () =
     }
   });
 
+  /**
+   * 같은 VPC 안에서 사설 주소로 붙으면 그 주소가 서버 인증서에 없다(2026-10-30 AWS 이전). 검증을 끄지 않고, 인증서에 있는 이름을
+   *   DATABASE_TLS_NAME으로 따로 준다. IP로 붙을 때만 쓰인다 — node-postgres는 IP면 servername을 비워 ssl.host가 확인 대상이 되고,
+   *   이름으로 붙으면 servername을 그 이름으로 덮어 확인 이름이 바뀌지 않는다(실패하면 붙지 않을 뿐 — 아래 pg 소스 고정 참조).
+   */
+  it("IP로 붙고 DATABASE_TLS_NAME이 있으면 그 이름으로 인증서를 확인한다(사설 주소가 인증서에 없을 때)", () => {
+    const raw = "postgresql://app:pw@10.0.0.5:5432/maeum?sslmode=verify-full";
+    for (const [name, want] of [["db.example.com", "db.example.com"], ["  DB.Example.COM ", "db.example.com"], ["203.0.113.10", "203.0.113.10"]]) {
+      const r = pgTlsOptions(raw, { DATABASE_TLS_NAME: name });
+      expect(r.ssl).toEqual({ ca: ONPREM_DB_CA, rejectUnauthorized: true, host: want });
+      // 🔒 접속 대상은 그대로 — 확인 이름만 바뀐다
+      expect(new URL(r.connectionString).hostname).toBe("10.0.0.5");
+    }
+    // 비었거나 공백뿐이면 지금처럼 접속 IP로 확인한다
+    for (const v of ["", "   ", undefined]) {
+      expect(pgTlsOptions(raw, { DATABASE_TLS_NAME: v }).ssl).toEqual({ ca: ONPREM_DB_CA, rejectUnauthorized: true, host: "10.0.0.5" });
+    }
+  });
+
+  it("DATABASE_TLS_NAME은 이름으로 붙을 때·RDS·검증 끄기에는 끼어들지 않는다", () => {
+    expect(pgTlsOptions(BY_NAME, { DATABASE_TLS_NAME: "other.example.com" }).ssl).toEqual({ ca: ONPREM_DB_CA, rejectUnauthorized: true });
+    expect(pgTlsOptions(RDS, { DATABASE_TLS_NAME: "other.example.com" }).ssl).toEqual({ ca: RDS_CA, rejectUnauthorized: true });
+    expect(pgTlsOptions(BY_NAME, { DATABASE_TLS_NAME: "other.example.com", DATABASE_SSL_NO_VERIFY: "1" }).ssl).toEqual({ rejectUnauthorized: false });
+  });
+
+  it("node-postgres는 IP로 붙으면 servername을 넣지 않는다 — 그래야 ssl.host가 확인 이름이 된다(pg를 올릴 때 깨지면 여기서 잡힌다)", () => {
+    const req = createRequire(import.meta.url);
+    const src = readFileSync(req.resolve("pg/lib/connection.js"), "utf-8");
+    // 🔒 우리 ssl 객체를 먼저 펼치고, IP가 아닐 때만 servername을 접속 이름으로 덮는다
+    expect(src).toMatch(/Object\.assign\(options, self\.ssl\)/);
+    expect(src).toMatch(/if \(net\.isIP && net\.isIP\(host\) === 0\) \{\s*options\.servername = host/);
+  });
+
   it("이름은 대소문자를 가리지 않는다 · 이름으로 붙을 땐 host를 덧붙이지 않는다", () => {
     expect(pgTlsOptions("postgresql://u:p@DB.Example.COM:5432/maeum", {}).ssl).toEqual({ ca: ONPREM_DB_CA, rejectUnauthorized: true });
   });
