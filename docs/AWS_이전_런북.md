@@ -213,7 +213,7 @@ npm run check:env:deploy    # 실제 런타임 환경에서 실행 — 빌드 �
 ## 5. 이전 후 (D+1 ~ D+7)
 
 - [ ] `pilot-daily-check`가 이 PC에서 그대로 도는지 확인 — **응급 미발송 워치독이 살아 있는가**(실행 위치는 바뀌지 않았다)
-- [ ] 운영자 경보 수신 확인(`OPS_ALERT_EMAIL` 없으면 `GMAIL_USER` 받은편지함) — 10-30 새 주소 L3 시험 1통이 갔다(로그상 알림 단계 도달)
+- [x] 운영자 경보 수신 확인(`OPS_ALERT_EMAIL` 없으면 `GMAIL_USER` 받은편지함) — 10-30 새 주소 시험이 보낸 3통(13:48 1통, 14:41 2통)을 사용자가 받은편지함에서 확인 = AWS에서 Gmail 발송 정상
 - [ ] CloudWatch에 `[emergency-notify] ... not sent` 패턴 알람 — 알림을 보낼 SNS 권한이 없다(그룹웨어 담당 쪽에 요청)
       (지금은 로그로만 남는다 — Vercel 대시보드에서 보던 것)
 - [ ] Play Console의 `vercel.app` URL 3곳 교체(개인정보처리방침·RTDN·출시 가이드 문서) — 넘기기가 있으니 급하지는 않다
