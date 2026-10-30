@@ -39,8 +39,8 @@ describe("시크릿이 이미지에 들어가지 않는다", () => {
     expect(ignoreRules).toContain(".next");
   });
 
-  it("APK는 제외하지 않는다 — 구버전 앱의 유일한 업데이트 경로", () => {
-    // 🔒 app/login/page.tsx가 /maeum-app.apk를 직접 서비스한다. 빼면 404가 된다.
+  it("APK는 제외하지 않는다 — 예전에 공유한 직접 링크(/maeum-app.apk)", () => {
+    // 🔒 로그인 화면 링크는 2026-10-30에 없앴지만(Play 배포), 이미 공유된 /maeum-app.apk 링크는 그대로 열려야 한다. 빼면 404가 된다.
     //   (.dockerignore 주석에는 "왜 제외하지 않는지" 설명이 있으므로 규칙 줄만 본다)
     for (const r of ignoreRules) expect(r, `규칙으로 제외됨: ${r}`).not.toMatch(/maeum-app\.apk/);
     expect(ignoreRules).not.toContain("public");

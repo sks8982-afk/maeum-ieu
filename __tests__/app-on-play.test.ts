@@ -157,18 +157,22 @@ describe("로그인 화면 업데이트 안내 + 받기 버튼(AppDownload) — 
     expect(html).not.toContain("maeum-app.apk");
   });
 
-  it("꺼짐 + 브라우저: 지금 그대로 — 웹 APK(download, 같은 창), '테스트용 · 안드로이드 전용(.apk)' · '최신 v1.0.3', 현재 버전 줄 없음", async () => {
-    const html = await renderDownload(undefined, { updateNeeded: false, appVersion: null, inApp: false });
-    const a = anchorTo(html, "/maeum-app.apk");
-    expect(a).toBeDefined();
-    expect(a).toContain('download="마음이음.apk"');
-    expect(a).not.toContain("target=");
-    expect(html).toContain("📱 안드로이드 앱 다운로드 (v1.0.3)");
-    expect(html).toContain("테스트용 · 안드로이드 전용(.apk)");
-    expect(html).toContain("최신 v1.0.3");
-    expect(html).not.toContain("현재 버전");
-    // 🔒 1.2.0을 모두가 받을 수 있기 전(단계적 출시 100% 전)에 Play로 보내면 받을 수 없는 앱 때문에 쓰던 앱을 지운다
+  /**
+   * 웹 APK 링크는 없앴다(2026-10-30 사용자: "Play 스토어에 배포했으니 로그인 화면의 안드로이드 앱 다운로드 링크는 없앤다").
+   *   스위치가 꺼져 있으면 브라우저에도 아무것도 그리지 않는다 — Play 링크는 스위치를 켠 뒤(1.2.0 단계적 출시 100%)에 나온다.
+   *   public/maeum-app.apk 파일은 남긴다(예전에 공유한 직접 링크) — 화면에서만 뺀다.
+   */
+  it.each([
+    ["업데이트 불필요", { updateNeeded: false, appVersion: null }],
+    ["업데이트 필요", { updateNeeded: true, appVersion: null }],
+  ])("꺼짐 + 브라우저 %s: 아무것도 그리지 않는다 — 웹 APK 링크·'테스트용 .apk'·'최신 v1.0.3'·Play 링크 없음", async (_, props) => {
+    const html = await renderDownload(undefined, { ...props, inApp: false });
+    expect(html).not.toContain("maeum-app.apk");
+    expect(html).not.toContain("안드로이드 앱 다운로드");
+    expect(html).not.toContain("최신 v1.0.3");
+    // 🔒 1.2.0을 모두가 받을 수 있기 전(단계적 출시 100% 전)에 Play로 보내면 받을 수 없는 앱 때문에 쓰던 앱을 지운다 — 켜기 전엔 Play도 아니다
     expect(html).not.toContain("play.google.com");
+    expect(html).toBe("");
   });
 
   it("켜짐 + 브라우저: Play 스토어 — PLAY_STORE_URL을 새 창(target=_blank)으로, download·APK 없음", async () => {
@@ -202,7 +206,7 @@ describe("배포 점검에 스위치가 보인다", () => {
     const src = readFileSync("scripts/check-env.ts", "utf-8");
     // 🔒 빌드 타임 목록에 없으면 'env는 넣었는데 재배포를 안 해서 꺼져 있음'이 점검에 안 보인다
     expect(src).toMatch(/const BUILD_TIME_VARS = \[[^\]]*"NEXT_PUBLIC_APP_ON_PLAY"[^\]]*\]/);
-    expect(src).toContain('{ label: "Play 배포 안내", name: "NEXT_PUBLIC_APP_ON_PLAY", fallback: "off(웹 APK 1.0.3 안내)"');
+    expect(src).toContain('{ label: "Play 배포 안내", name: "NEXT_PUBLIC_APP_ON_PLAY", fallback: "off(로그인 화면 앱 받기 없음)"');
     // 🔒 (2026-10-08) 켜는 때 — "공개 후"면 단계적 출시 중(일부 사용자만 1.2.0)에 켜, 나머지에게 받을 수 없는 업데이트를 안내한다
     expect(src).toContain('note: "⚠ 빌드 타임 — 1.2.0 프로덕션 단계적 출시가 100%가 된 뒤 1로 켜고 재배포"');
     expect(src).not.toMatch(/1\.2\.0 공개 후/);

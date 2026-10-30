@@ -140,7 +140,7 @@ const EFFECTIVE: { label: string; name: string; fallback: string; note: string }
   { label: "프롬프트 캐시", name: "PROMPT_CACHE", fallback: "off(1일 때만 on)", note: "멀티 인스턴스에서 핸들이 인스턴스별" },
   { label: "C2 악화 알림", name: "C2_NOTIFY", fallback: "off", note: "" },
   { label: "Live 베타 노출", name: "NEXT_PUBLIC_SHOW_LIVE_BETA", fallback: "off", note: "⚠ 빌드 타임에 번들에 박힌다 — 런타임 주입으로는 바뀌지 않는다" },
-  { label: "Play 배포 안내", name: "NEXT_PUBLIC_APP_ON_PLAY", fallback: "off(웹 APK 1.0.3 안내)", note: "⚠ 빌드 타임 — 1.2.0 프로덕션 단계적 출시가 100%가 된 뒤 1로 켜고 재배포" },
+  { label: "Play 배포 안내", name: "NEXT_PUBLIC_APP_ON_PLAY", fallback: "off(로그인 화면 앱 받기 없음)", note: "⚠ 빌드 타임 — 1.2.0 프로덕션 단계적 출시가 100%가 된 뒤 1로 켜고 재배포" },
   { label: "FCM 기대 프로젝트", name: "FCM_PROJECT_ID", fallback: EXPECTED_FCM_PROJECT_ID, note: "서비스 계정의 project_id가 이와 다르면 서버가 FCM을 끈다(앱 google-services.json 기준)" },
 ];
 
