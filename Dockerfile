@@ -73,6 +73,11 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     KEEP_ALIVE_TIMEOUT=65000
 
+# 배포된 커밋 — /api/health가 **실행 중에** 읽는다(next build가 번들에 박지 않는다).
+#   ARG·ENV는 스테이지마다 따로라 빌더의 ENV는 여기까지 오지 않는다(10-30 실빌드에서 늘 "unknown"이었다).
+ARG APP_REVISION="unknown"
+ENV APP_REVISION=${APP_REVISION}
+
 # root로 돌리지 않는다 — 컨테이너 탈출 시 피해 범위를 줄인다
 RUN groupadd --system --gid 1001 nodejs \
  && useradd --system --uid 1001 --gid nodejs nextjs

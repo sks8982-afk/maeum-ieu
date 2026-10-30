@@ -1,9 +1,9 @@
 /**
  * Dockerfile·배포 설정의 **깨지면 조용한** 불변식 고정.
  *
- * ⚠ 이 테스트는 Docker 빌드를 대신하지 못한다. 이 환경에는 Docker Desktop이 없어
- *   이미지를 실제로 만들어 보지 못했다 — 실빌드 검증은 docs/AWS_이전_런북.md의
- *   사전 점검 항목으로 남겼다. 여기서 잡는 건 "나중에 누가 무심코 되돌리는" 쪽이다.
+ * ⚠ 이 테스트는 Docker 빌드를 대신하지 못한다. 실빌드·실행 확인은 docs/AWS_이전_런북.md 1.1에서 한다
+ *   (2026-10-30 처음 해 봤고, 이 테스트가 못 잡던 APP_REVISION 누락이 거기서 나왔다).
+ *   여기서 잡는 건 "나중에 누가 무심코 되돌리는" 쪽이다.
  *
  * 전부 **배포는 성공하는데 기능만 안 되는** 유형이라, 사람 눈으로는 늦게 발견된다.
  */
@@ -87,6 +87,16 @@ describe("런타임 — 조용히 깨지는 지점", () => {
 
   it("root로 실행하지 않는다", () => {
     expect(df).toMatch(/USER nextjs/);
+  });
+
+  it("배포 커밋(APP_REVISION)이 런타임 스테이지에도 ENV로 있다", () => {
+    // 🔒 ARG·ENV는 스테이지마다 따로다. 빌더에만 두면 /api/health의 revision이 늘 "unknown"이라
+    //    ECS에 어느 커밋이 떠 있는지 확인할 수 없다(10-30 실빌드에서 발견 — --build-arg를 줘도 unknown).
+    const runnerAt = df.search(/^FROM .* AS runner\s*$/m);
+    expect(runnerAt, "runner 스테이지를 찾지 못함").toBeGreaterThan(-1);
+    const runner = df.slice(runnerAt);
+    expect(runner, "runner 스테이지에 ARG APP_REVISION 없음").toMatch(/^ARG APP_REVISION=/m);
+    expect(runner, "runner 스테이지에 ENV APP_REVISION 없음").toMatch(/^ENV APP_REVISION=\$\{APP_REVISION\}\s*$/m);
   });
 
   it("Node 버전이 .nvmrc와 같다", async () => {

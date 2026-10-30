@@ -36,10 +36,18 @@
 
 ## 1. 이전 전 — 코드 밖에서 해야 하는 일
 
-### 1.1 ⚠ Docker 실빌드 검증 (아직 안 됨)
+### 1.1 Docker 실빌드 검증 — ✅ 2026-10-30 처음 통과
 
-작성 환경에 Docker Desktop이 없어 **이미지를 한 번도 만들어 보지 못했다.**
-반드시 먼저 하고, 아래 세 가지를 **눈으로** 확인한다.
+10-30에 이 PC(Docker Desktop)에서 처음 빌드·실행했다. 컨텍스트 127MB, 빌드 약 1분 반, 이미지 492MB이고, 아래 세 가지를 모두 통과했다.
+- `.env`·`training-data`·`scripts`·`docs`가 이미지에 없다.
+- APK와 `.next/static`이 들어 있다.
+- `/api/health`가 200을 준다.
+
+같이 나온 결함 하나: 배포 커밋(`APP_REVISION`)이 런타임 스테이지로 넘어가지 않아 health가 늘 `"unknown"`이었다. Dockerfile을 고치고 계약 테스트를 더했다.
+
+빌드 로그의 `Prisma failed to detect the libssl/openssl version` 경고는 무시해도 된다. Prisma 7은 WASM 엔진이라 네이티브 엔진을 쓰지 않는다(가짜 DB 주소로 회원가입 조회 경로까지 확인 — 엔진은 실리고 연결만 거부됨).
+
+**이미지를 새로 만들 때마다** 아래 세 가지를 다시 **눈으로** 확인한다(Git Bash에서는 `/app` 경로가 바뀌지 않게 명령 앞에 `MSYS_NO_PATHCONV=1`).
 
 ```bash
 docker build --build-arg APP_REVISION=$(git rev-parse --short HEAD) -t maeum:test .
