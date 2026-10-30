@@ -50,14 +50,17 @@ export class LiveVoiceEngine {
   private aiBuf = "";
   private stopped = false;
   private conversationId: string | undefined;
+  /** 날씨용 대략적 위치 — 토큰 요청에 실어 세션 지시문의 날씨가 실제 날씨가 되게 한다(없으면 서버가 '확인 안 됨', 2026-10-30) */
+  private location: { latitude: number; longitude: number } | undefined;
   private reconnects = 0;
 
   constructor(cb: LiveVoiceCallbacks) {
     this.cb = cb;
   }
 
-  async start(opts?: { fakeMic?: boolean; conversationId?: string }) {
+  async start(opts?: { fakeMic?: boolean; conversationId?: string; location?: { latitude: number; longitude: number } }) {
     this.conversationId = opts?.conversationId;
+    this.location = opts?.location;
     await this.connect();
     if (!opts?.fakeMic) await this.startMic();
   }
@@ -67,7 +70,7 @@ export class LiveVoiceEngine {
     const tokRes = await fetch("/api/live/token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversationId: this.conversationId }),
+      body: JSON.stringify({ conversationId: this.conversationId, ...this.location }),
     });
     if (!tokRes.ok) {
       // 일일 대화량 상한은 오류가 아니라 '하루를 닫는 인사' — 어르신에게 기술 문구를 보이지 않는다.

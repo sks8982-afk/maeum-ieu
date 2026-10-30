@@ -43,10 +43,24 @@ function LiveInner() {
   // 복약 리마인더 — classic(/chat)과 동일 API(check→trigger→긍정답변 자동기록) 재사용
   const pendingMedRef = useRef<{ scheduleId: string; doseTime: string; ts: number } | null>(null);
   const stateRef = useRef("idle");
+  /** 날씨용 대략적 위치 — 채팅 화면(app/chat/page.tsx)과 같은 방식. 거부·실패면 undefined(서버가 '확인 안 됨'으로 둔다, 2026-10-30) */
+  const locationRef = useRef<Promise<{ latitude: number; longitude: number } | undefined> | null>(null);
 
   useEffect(() => {
     if (status === "unauthenticated") router.replace("/login");
   }, [status, router]);
+
+  // 화면에 들어오면 바로 위치를 묻는다 — 대화 시작 때 기다리지 않게(대략적 위치·5분 캐시, 권한 거부 시 없음)
+  useEffect(() => {
+    locationRef.current = new Promise((resolve) => {
+      if (typeof window === "undefined" || !navigator.geolocation) return resolve(undefined);
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+        () => resolve(undefined),
+        { enableHighAccuracy: false, timeout: 5000, maximumAge: 300000 },
+      );
+    });
+  }, []);
 
   useEffect(() => () => { engineRef.current?.stop(); }, []);
 
@@ -195,7 +209,12 @@ function LiveInner() {
         (window as unknown as Record<string, unknown>).__livePush = (b64: string) => engine.injectPcm(b64);
         (window as unknown as Record<string, unknown>).__liveEnd = () => engine.endInjectedUtterance();
       }
-      await engine.start({ fakeMic, conversationId: convRef.current ?? undefined });
+      // 날씨용 위치는 1.2초까지만 기다린다 — 없으면 날씨 없이('확인 안 됨') 시작한다(대화 시작을 늦추지 않는다)
+      const location = await Promise.race([
+        locationRef.current ?? Promise.resolve(undefined),
+        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 1200)),
+      ]);
+      await engine.start({ fakeMic, conversationId: convRef.current ?? undefined, location });
       engine.greet(); // AI가 먼저 인사
     } catch (e) {
       setError((e as Error).message);

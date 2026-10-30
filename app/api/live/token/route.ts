@@ -18,7 +18,7 @@ import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { buildSystemPrompt, GENERAL_NO_COGNITIVE_RULE } from "@/lib/chat/prompt";
 import { getTimeContext } from "@/lib/chat/time";
-import { getWeatherContext } from "@/lib/chat/weather";
+import { getWeatherContext, coordsFrom } from "@/lib/chat/weather";
 import { getDailyUsage, buildDailyLimitReplyForUser } from "@/lib/usage/daily-limit";
 import { isLiveBetaEnabledServer } from "@/lib/feature-flags";
 
@@ -123,7 +123,10 @@ export async function POST(req: Request) {
     // 검진(pro) 흐름은 Live 미지원이라 일반인 외에는 사용자 모드로 고정.
     const mode = session.user.screeningMode === "general" ? "general" : "user";
     const timeCtx = getTimeContext();
-    const weather = await getWeatherContext(); // 좌표 없음 — 기본 지역 폴백(세션 시작 시점 스냅샷)
+    // 화면이 보낸 좌표로 날씨를 묻는다(세션 시작 시점 스냅샷). 없거나 이상하면 '확인 안 됨' — 지어내지 않는다.
+    //   (2026-10-30 정정: 예전엔 좌표 없이 불러 Live 대화의 날씨가 언제나 "맑음"이었다 — lib/chat/weather 주석)
+    const { latitude, longitude } = coordsFrom(body);
+    const weather = await getWeatherContext(latitude, longitude);
     const { stablePrompt } = await buildSystemPrompt({ userId, conversationId, timeCtx, weather, mode });
 
     /**

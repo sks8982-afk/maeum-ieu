@@ -42,7 +42,13 @@ vi.mock("@/lib/chat/prompt", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/chat/prompt")>()),   // GENERAL_NO_COGNITIVE_RULE는 실제 값
   buildSystemPrompt: (a: { mode: string }) => buildSystemPrompt(a),
 }));
-vi.mock("@/lib/chat/weather", () => ({ getWeatherContext: vi.fn(async () => ({ promptText: "맑음", description: "맑음" })) }));
+const getWeather = vi.fn<(lat?: number, lon?: number) => Promise<{ promptText: string; description: string; location: string }>>(
+  async () => ({ promptText: "현재 날씨: 비 또는 눈, 9°C", description: "비 또는 눈", location: "" }));
+// coordsFrom은 실제 함수를 쓴다 — 좌표 검사가 라우트에서 실제로 도는지 본다(아래 '날씨' describe)
+vi.mock("@/lib/chat/weather", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/chat/weather")>()),
+  getWeatherContext: (lat?: number, lon?: number) => getWeather(lat, lon),
+}));
 const createToken = vi.fn<(a: { config: { liveConnectConstraints: { config: { systemInstruction: string } } } }) => Promise<{ name: string }>>(
   async () => ({ name: "tok-1" }));
 // 원본을 펼친다 — 실제 prompt.ts의 하위 의존성이 HarmCategory 등 다른 export를 쓴다(부분 목은 깨진다)
@@ -68,7 +74,7 @@ beforeEach(() => {
   usage = { used: 10, limit: 200, exceeded: false, nearLimit: false, remaining: 190 };
   consented = true;
   session = { user: { id: "u-elder", screeningMode: "user" } };
-  for (const f of [getDailyUsage, buildSystemPrompt, createToken]) f.mockClear();
+  for (const f of [getDailyUsage, buildSystemPrompt, createToken, getWeather]) f.mockClear();
 });
 
 /** 발급한 토큰마다 Live 연결 제약(모델·세션 config) — 브라우저 세션에 실제로 걸리는 설정 */
@@ -210,5 +216,27 @@ describe("Live 세션 thinking — 모델 세대별 (2026-10-07)", () => {
     const constraints = issuedConstraints();
     expect(constraints.model).toBe("gemini-3.1-flash-live-preview");
     expect(constraints.config.thinkingConfig).toStrictEqual({ thinkingBudget: 0 });
+  });
+});
+
+/**
+ * Live 세션 날씨(2026-10-30) — 예전엔 좌표 없이 getWeatherContext()를 불러, Live 대화의 날씨는 언제나 지어낸 "맑음"이었다
+ *   (위치를 모르면 "맑음"을 넣던 기본값 — lib/chat/weather 주석). 화면이 보낸 좌표로 묻고, 이상한 좌표는 버린다.
+ */
+describe("Live 세션 날씨 — 화면이 보낸 좌표로", () => {
+  it("좌표가 오면 그 좌표로 날씨를 묻고, 그 날씨가 세션 지시문에 실린다", async () => {
+    expect((await call({ conversationId: "c-1", latitude: 37.2, longitude: 127.07 })).status).toBe(200);
+    expect(getWeather).toHaveBeenCalledWith(37.2, 127.07);
+    expect(issuedInstruction()).toContain("현재 날씨: 비 또는 눈, 9°C");
+  });
+
+  it.each([
+    ["좌표 없음", { conversationId: "c-1" }],
+    ["문자열 좌표", { conversationId: "c-1", latitude: "37.2", longitude: "127.07" }],
+    ["범위 밖", { conversationId: "c-1", latitude: 137.2, longitude: 127.07 }],
+    ["하나만", { conversationId: "c-1", latitude: 37.2 }],
+  ])("%s → 좌표 없이 묻는다(날씨 모듈이 '확인 안 됨'으로 둔다)", async (_, body) => {
+    expect((await call(body)).status).toBe(200);
+    expect(getWeather).toHaveBeenCalledWith(undefined, undefined);
   });
 });
