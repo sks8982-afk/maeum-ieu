@@ -20,6 +20,10 @@
 # 4) **KEEP_ALIVE_TIMEOUT을 ALB idle timeout보다 크게.** Node 기본은 5초인데 ALB 기본은 60초라,
 #    ALB가 재사용하려는 연결을 Node가 먼저 닫아 간헐 502가 난다(SSE 음성 턴에서 특히).
 #    standalone server.js가 이 env를 읽는다(next/dist/build/utils.js 확인).
+#
+# 5) **ECS(Fargate)는 HOSTNAME을 작업 이름으로 덮어쓴다.** 아래 ENV HOSTNAME=0.0.0.0이 무시되고 Next가 작업 IP에만 붙는다.
+#    ALB 헬스체크(작업 IP로 옴)는 통과하는데 컨테이너 헬스체크(127.0.0.1)는 실패해서, ECS가 정상 작업을 2~3분마다
+#    "unhealthy"로 갈아 끼운다(2026-10-30 실측). → **작업 정의 environment에 HOSTNAME=0.0.0.0을 꼭 넣는다.**
 
 # ── 1) 의존성 ────────────────────────────────────────────────────────────────
 FROM node:22.20.0-bookworm-slim AS deps
