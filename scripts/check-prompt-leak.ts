@@ -10,13 +10,16 @@
  *     - "큰아들 X" 같이 이름 placeholder 자리에 실제 한글 이름(2~3글자)이 박혔는지 휴리스틱.
  *     - DB 접근 불필요 — GitHub Actions/CI 환경에서 안전.
  *
- * Exit code: 0 = clean, 1 = leak found
+ * Exit code: 0 = clean, 1 = leak found, 2 = DATABASE_URL 없음, 3 = 실행 오류(DB 연결 등 — 누출 아님)
+ *
+ * GitHub Actions(공개 저장소)에서 돌 때는 걸린 값과 오류 속 서버 주소를 가린다(scripts/prompt-leak-redact, 2026-11-20).
  */
 import "dotenv/config";
 import * as fs from "fs";
 import * as path from "path";
 import { Pool } from "pg";
 import { pgTlsOptions } from "../lib/db-tls";
+import { inCi, maskValue, maskIn, scrubHosts } from "./prompt-leak-redact";
 const ROOT = path.resolve(__dirname, "..");
 // systemPrompt에 직접 들어가는 정적 텍스트 파일만 검사.
 // route.ts는 코드+주석이라 LLM prompt와 무관 — 제외.
@@ -179,11 +182,23 @@ async function main() {
   }
 
   console.error(`\n❌ Found ${violations.length} prompt leaks (user-specific data in static prompts):\n`);
+  // 공개 저장소의 Actions 로그는 누구나 본다 — 실제 사용자 값(가족 이름·고향)을 가려 찍는다(로컬은 그대로)
+  const ci = inCi();
   for (const v of violations) {
-    console.error(`  ${v.file}:${v.line} [${v.type}=${v.value}]`);
-    console.error(`    ${v.snippet}`);
+    const value = ci ? maskValue(v.value) : v.value;
+    const snippet = ci ? maskIn(v.snippet, v.value) : v.snippet;
+    console.error(`  ${v.file}:${v.line} [${v.type}=${value}]`);
+    console.error(`    ${snippet}`);
   }
+  if (ci) console.error("\n(GitHub Actions에서는 값을 가렸다 — 로컬에서 `npx tsx scripts/check-prompt-leak.ts`로 다시 돌려 확인)");
   console.error("\nAction: replace concrete examples with placeholders (○○, [이름A], [장소]) — DO NOT use real user data.");
   process.exit(1);
 }
-main().catch(e => { console.error(e); process.exit(1); });
+main().catch((e) => {
+  // 3 = 검사 실행 오류(DB 연결 등) — 누출(1)과 구분한다(2026-11-20: 설치·연결 실패도 "누출 발견" 메일로 왔다).
+  //   CI에서는 오류 메시지 속 DB 서버 주소를 가린다
+  const msg = e instanceof Error ? e.message : String(e);
+  console.error(`❌ 검사 실행 오류(누출 아님): ${inCi() ? scrubHosts(msg) : msg}`);
+  if (!inCi()) console.error(e);
+  process.exit(3);
+});

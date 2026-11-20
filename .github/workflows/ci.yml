@@ -35,8 +35,12 @@ jobs:
           node-version: '22.20.0'   # 로컬·Docker 베이스와 동일하게 고정(2026-10-02) — 버전이 갈리면 CI 녹색이 배포 안전을 보증하지 못한다
           cache: 'npm'
 
+      # onnxruntime-node의 GPU(CUDA) 파일(api.nuget.org)은 받지 않는다 — 시험에 필요 없고, 그 서버가 막히면 관계없는 커밋의 CI까지 실패한다
+      #   (2026-11-20 야간 검사가 그렇게 실패했다 — prompt-leak-full.yml 같은 주석)
       - name: Install dependencies
         run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
 
       - name: TypeScript compile check
         run: npx tsc --noEmit

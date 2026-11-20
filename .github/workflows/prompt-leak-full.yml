@@ -7,8 +7,9 @@
 #   - workflow_dispatch: 운영자가 GitHub UI에서 수동 실행
 #   - schedule: 매일 한국 시각 새벽 3시 (UTC 18:00) 자동 실행
 #
-# 보안: DATABASE_URL은 GitHub Secrets에 저장. CI 환경에서만 접근. 결과 로그에는
-#       사용자 이름이 노출될 수 있으므로 PR review에서는 사용 X (private 저장소 권장).
+# 보안: DATABASE_URL은 GitHub Secrets에 저장. CI 환경에서만 접근.
+#       이 저장소는 공개라 Actions 로그를 누구나 본다 — 검사 스크립트가 Actions에서는 걸린 값(가족 이름·고향)과
+#       오류 속 DB 서버 주소를 가려 찍는다(scripts/prompt-leak-redact, 2026-11-20). 2026-11-20 옛 사본 저장소에서 이리로 옮겼다.
 
 name: Prompt-leak Full Check (DB-backed)
 
@@ -39,17 +40,34 @@ jobs:
           node-version: '22.20.0'   # ci.yml과 동일 고정(2026-10-02)
           cache: 'npm'
 
+      # onnxruntime-node는 설치 때 GPU(CUDA) 파일을 api.nuget.org에서 받는다 — 검사에 필요 없고(CPU 파일은 패키지 안에 있다),
+      #   2026-11-20엔 그 서버 연결 시간 초과로 검사가 돌기도 전에 실패했다. skip이면 패키지 밖 파일을 받지 않는다(script/install.js).
       - run: npm ci
         if: ${{ env.DB_URL != '' }}
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
 
+      # 종료 코드를 남긴다 — 0 깨끗 / 1 누출 / 2 DATABASE_URL 없음 / 3 실행 오류(DB 연결 등). 아래 알림이 원인별로 다르게 찍는다.
       - name: Prompt-leak full (DB cross-check)
+        id: leak
         if: ${{ env.DB_URL != '' }}
-        run: npx tsx scripts/check-prompt-leak.ts
+        run: |
+          set +e
+          npx tsx scripts/check-prompt-leak.ts
+          code=$?
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          exit $code
         env:
           DATABASE_URL: ${{ env.DB_URL }}
 
+      # 실패 알림은 원인별로 — 2026-11-20 설치 실패도 "Prompt-leak detected!"로 와서 누출로 오해했다.
       - name: Notify on failure
         if: ${{ failure() && env.DB_URL != '' }}
         run: |
-          echo "::error::Prompt-leak detected! User-specific data may be embedded in prompts."
-          echo "Run locally: npx tsx scripts/check-prompt-leak.ts"
+          if [ "${{ steps.leak.outputs.code }}" = "1" ]; then
+            echo "::error::누출 발견 — 프롬프트 파일에 실제 사용자 데이터(가족 이름·고향 등)가 들어 있다. 로컬에서 npx tsx scripts/check-prompt-leak.ts로 확인"
+          elif [ -n "${{ steps.leak.outputs.code }}" ]; then
+            echo "::error::누출 검사가 끝까지 돌지 못했다(종료 코드 ${{ steps.leak.outputs.code }} — DB 연결 등). 누출이 아니다. 검사 단계 로그를 볼 것"
+          else
+            echo "::error::검사 전 단계(설치 등)가 실패해 누출 검사는 돌지 않았다 — 누출이 아니다. 외부 서버 일시 장애면 다시 돌리면 된다"
+          fi
